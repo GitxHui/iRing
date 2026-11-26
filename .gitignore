@@ -1,0 +1,16 @@
+# SwiftPM & Xcode build artifacts
+.build/
+build/
+dist/
+*.dmg
+*.zip
+*.app
+.swiftpm/
+*.xcuserstate
+*.xcuserdata
+
+# OS & temporary local artifacts
+.DS_Store
+.original-before-ui-changes/
+CHANGES-ui.diff
+Claude outputs/
