@@ -36,7 +36,7 @@ public final class GlobalHotkeyManager {
         moveScreenShortcut: CustomKeyCombo,
         radialShortcut: CustomKeyCombo?,
         splitRingShortcut: CustomKeyCombo? = nil,
-        numberModifier: NumberSwitchModifier,
+        numberModifiers: UInt32?,
         handler: @escaping (Action) -> Void
     ) {
         self.onAction = handler
@@ -97,18 +97,15 @@ public final class GlobalHotkeyManager {
             kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9
         ]
 
-        let modMask: UInt32?
-        switch numberModifier {
-        case .option:
-            modMask = UInt32(optionKey)
-        case .command:
-            modMask = UInt32(cmdKey)
-        case .disabled:
-            modMask = nil
-        }
-
-        if let mask = modMask {
+        if let portableMods = numberModifiers, portableMods != 0 {
+            let mask = carbonModifiers(from: portableMods)
             for (index, keyCode) in numKeyCodes.enumerated() {
+                let combo = CustomKeyCombo(keyCode: UInt32(keyCode), modifiers: portableMods)
+                guard combo != toggleShortcut,
+                      combo != moveScreenShortcut,
+                      combo != radialShortcut,
+                      combo != splitRingShortcut
+                else { continue }
                 register(
                     id: UInt32(200 + index),
                     keyCode: UInt32(keyCode),

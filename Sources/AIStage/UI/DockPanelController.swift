@@ -201,6 +201,7 @@ public final class DockPanelController: NSObject {
         hostingView.frame = panel.contentRect(forFrameRect: panel.frame)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        hostingView.layer?.shadowOpacity = 0
         panel.contentView = hostingView
     }
 
@@ -257,6 +258,17 @@ public final class DockPanelController: NSObject {
             self?.showSettingsWindow()
         }
 
+        coordinator.onOpenAddAppRequested = { [weak self] in
+            self?.showAddAppWindow()
+        }
+
+        coordinator.onLanguageDidChange = { [weak self] in
+            guard let self else { return }
+            self.settingsWindow?.title = L10n.t("iRing 偏好设置", "iRing Settings")
+            self.addAppWindow?.title = L10n.t("添加应用到 iRing", "Add Apps to iRing")
+            self.onboardingWindow?.title = L10n.t("欢迎使用 iRing", "Welcome to iRing")
+        }
+
         coordinator.onPlayWindowPopTransition = { [weak self] style, item, image, fromIconRect, toWindowRect, duration, completion in
             guard let self else {
                 completion()
@@ -281,12 +293,35 @@ public final class DockPanelController: NSObject {
         canvasRect != nil ? visibleIslandFrame : panel.frame
     }
 
+    /// Visible background frame excluding the transparent magnification pop-out strip.
+    private var currentBackgroundFrame: CGRect {
+        var r = currentVisibleFrame
+        guard coordinator.settings.dockShape == .dynamicIsland,
+              coordinator.settings.islandExpandAxis == .alongEdge
+        else { return r }
+        let overflow = DisplayGeometry.magnificationOverflow(settings: coordinator.settings) * interactionState.islandExpandProgress
+        guard overflow > 0.5 else { return r }
+        switch coordinator.settings.islandPosition {
+        case .top:
+            r.origin.y += overflow
+            r.size.height = max(24, r.size.height - overflow)
+        case .bottom:
+            r.size.height = max(24, r.size.height - overflow)
+        case .left:
+            r.size.width = max(24, r.size.width - overflow)
+        case .right:
+            r.origin.x += overflow
+            r.size.width = max(24, r.size.width - overflow)
+        }
+        return r
+    }
+
     private func animateDockFrame(to targetAppKitFrame: CGRect, animated: Bool) {
         let rounded = targetAppKitFrame.integral
         let edge = coordinator.settings.islandPosition
         let screenID = coordinator.pinnedScreenID
         let desiredProgress: CGFloat = (coordinator.isDynamicIslandExpanded || coordinator.settings.dynamicIslandPinned) ? 1.0 : 0.0
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.islandAnimationSpeed
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         if !hasInitializedSpringState {
@@ -371,7 +406,7 @@ public final class DockPanelController: NSObject {
 
         let scaleFactor: CGFloat = switch speed {
         case .instant: 0.0
-        case .fast: 0.84
+        case .fast: 0.78
         case .smooth: 1.0
         case .relaxed: 1.32
         }
@@ -653,10 +688,11 @@ public final class DockPanelController: NSObject {
         }
 
         let frame = currentVisibleFrame
+        let bgFrame = currentBackgroundFrame
 
         // 1. Parabolic Magnification Pointer Tracking
-        let inPanel = frame.contains(mouseAppKit)
-        let inMagnificationCatchZone = frame.insetBy(dx: -8, dy: -8).contains(mouseAppKit)
+        let inPanel = bgFrame.contains(mouseAppKit)
+        let inMagnificationCatchZone = bgFrame.insetBy(dx: -8, dy: -8).contains(mouseAppKit)
 
         if inPanel {
             let localPoint = CGPoint(
@@ -702,7 +738,7 @@ public final class DockPanelController: NSObject {
 
             let expanded = coordinator.isDynamicIslandExpanded
             if !expanded {
-                let triggerRect = frame.insetBy(dx: -10, dy: -8)
+                let triggerRect = bgFrame.insetBy(dx: -10, dy: -8)
                 if triggerRect.contains(mouseAppKit) {
                     islandCollapseWorkItem?.cancel()
                     islandCollapseWorkItem = nil
@@ -726,8 +762,8 @@ public final class DockPanelController: NSObject {
                     height: targetH
                 )
                 let combinedFrame = (springDisplayLink != nil && !targetSpringFrame.isEmpty)
-                    ? frame.union(targetSpringFrame)
-                    : frame
+                    ? bgFrame.union(targetSpringFrame)
+                    : bgFrame
                 let keepOpenRect = combinedFrame.insetBy(dx: -16, dy: -16)
                 if keepOpenRect.contains(mouseAppKit) || mouseButtonsPressed || isMenuTracking {
                     islandCollapseWorkItem?.cancel()
@@ -842,7 +878,7 @@ public final class DockPanelController: NSObject {
         let view = SettingsView(coordinator: coordinator)
         let hosting = NSHostingController(rootView: view)
         let win = NSWindow(contentViewController: hosting)
-        win.title = "iRing 偏好设置"
+        win.title = L10n.t("iRing 偏好设置", "iRing Settings")
         win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         win.setContentSize(NSSize(width: 660, height: 560))
         win.minSize = NSSize(width: 580, height: 480)
@@ -866,7 +902,7 @@ public final class DockPanelController: NSObject {
         }
         let hosting = NSHostingController(rootView: view)
         let win = NSWindow(contentViewController: hosting)
-        win.title = "添加应用到 iRing"
+        win.title = L10n.t("添加应用到 iRing", "Add Apps to iRing")
         win.styleMask = [.titled, .closable, .resizable]
         win.setContentSize(NSSize(width: 440, height: 520))
         win.center()
@@ -878,16 +914,17 @@ public final class DockPanelController: NSObject {
     }
 
     public func showOnboardingWindowIfNeeded() {
-        if coordinator.isAccessibilityTrusted {
-            if !coordinator.settings.hasCompletedOnboarding {
-                coordinator.updateSettings { $0.hasCompletedOnboarding = true }
-            }
+        guard !coordinator.settings.hasCompletedOnboarding else { return }
+        if coordinator.isAccessibilityTrusted && !coordinator.apps.isEmpty {
+            coordinator.updateSettings { $0.hasCompletedOnboarding = true }
             return
         }
-        guard !coordinator.settings.hasCompletedOnboarding else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            guard let self, !self.coordinator.isAccessibilityTrusted, !self.coordinator.settings.hasCompletedOnboarding else { return }
+            guard let self,
+                  !self.coordinator.settings.hasCompletedOnboarding,
+                  (!self.coordinator.isAccessibilityTrusted || self.coordinator.apps.isEmpty)
+            else { return }
             if let existing = self.onboardingWindow {
                 NSApp.activate(ignoringOtherApps: true)
                 existing.makeKeyAndOrderFront(nil)
@@ -899,9 +936,9 @@ public final class DockPanelController: NSObject {
             }
             let hosting = NSHostingController(rootView: view)
             let win = NSWindow(contentViewController: hosting)
-            win.title = "欢迎使用 iRing"
+            win.title = L10n.t("欢迎使用 iRing", "Welcome to iRing")
             win.styleMask = [.titled, .closable]
-            win.setContentSize(NSSize(width: 440, height: 350))
+            win.setContentSize(NSSize(width: 480, height: 420))
             win.center()
             win.isReleasedWhenClosed = false
             self.onboardingWindow = win

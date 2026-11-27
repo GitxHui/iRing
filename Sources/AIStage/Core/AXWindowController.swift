@@ -97,10 +97,21 @@ public final class AXWindowController {
             let fileBase = appURL.deletingPathExtension().lastPathComponent.lowercased()
             return byTitleLower[fileBase]
         }
+
+        public func merged(with other: DockBadgeSnapshot) -> DockBadgeSnapshot {
+            DockBadgeSnapshot(
+                byBundleID: byBundleID.merging(other.byBundleID) { current, new in current.isEmpty ? new : current },
+                byAppPath: byAppPath.merging(other.byAppPath) { current, new in current.isEmpty ? new : current },
+                byTitleLower: byTitleLower.merging(other.byTitleLower) { current, new in current.isEmpty ? new : current }
+            )
+        }
     }
 
     public static func normalizedBadgeLabel(from raw: Any?) -> String? {
         guard let raw else { return nil }
+        if let dict = raw as? [String: Any] {
+            return normalizedBadgeLabel(from: dict["label"])
+        }
         let str: String
         if let s = raw as? String {
             str = s
@@ -115,6 +126,82 @@ public final class AXWindowController {
         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != "0" else { return nil }
         return trimmed
+    }
+
+    public static func parseLSAppInfoBadges(from output: String) -> [String: String] {
+        var result: [String: String] = [:]
+        let blocks = output.components(separatedBy: "\n---")
+        for block in blocks where !block.isEmpty {
+            guard let bid = extractQuotedValue(after: "\"CFBundleIdentifier\"=", in: block)?.lowercased(),
+                  !bid.isEmpty
+            else { continue }
+
+            var rawLabel: String?
+            if let statusRange = block.range(of: "\"StatusLabel\"") {
+                let tail = String(block[statusRange.upperBound...])
+                if let labelVal = extractQuotedValue(after: "\"label\"=", in: tail) {
+                    rawLabel = labelVal
+                } else if let directVal = extractQuotedValue(after: "=", in: tail),
+                          !tail.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("={") {
+                    rawLabel = directVal
+                }
+            }
+            if let badge = normalizedBadgeLabel(from: rawLabel) {
+                result[bid] = badge
+            }
+        }
+        return result
+    }
+
+    private static func extractQuotedValue(after marker: String, in text: String) -> String? {
+        guard let range = text.range(of: marker) else { return nil }
+        var idx = range.upperBound
+        while idx < text.endIndex && text[idx].isWhitespace {
+            idx = text.index(after: idx)
+        }
+        guard idx < text.endIndex, text[idx] == "\"" else { return nil }
+        idx = text.index(after: idx)
+        var out = ""
+        var escaped = false
+        while idx < text.endIndex {
+            let ch = text[idx]
+            if escaped {
+                out.append(ch)
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "\"" {
+                return out
+            } else {
+                out.append(ch)
+            }
+            idx = text.index(after: idx)
+        }
+        return nil
+    }
+
+    public static func readLaunchServicesBadges(forBundleIDs bundleIDs: [String]) -> DockBadgeSnapshot {
+        let unique = Array(Set(bundleIDs.filter { !$0.isEmpty })).sorted()
+        guard !unique.isEmpty else { return DockBadgeSnapshot() }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/lsappinfo")
+        proc.arguments = ["-all", "info", "-only", "CFBundleIdentifier,StatusLabel"] + unique
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+        } catch {
+            return DockBadgeSnapshot()
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard let output = String(data: data, encoding: .utf8), !output.isEmpty else {
+            return DockBadgeSnapshot()
+        }
+        let map = parseLSAppInfoBadges(from: output)
+        return DockBadgeSnapshot(byBundleID: map)
     }
 
     public static func readDockBadges() -> DockBadgeSnapshot {
@@ -141,7 +228,7 @@ public final class AXWindowController {
 
         let axDock = AXUIElementCreateApplication(dockApp.processIdentifier)
         var dockItems: [AXUIElement] = []
-        collectDockBadgeElements(from: axDock, depth: 0, maxDepth: 3, into: &dockItems)
+        collectDockBadgeElements(from: axDock, depth: 0, maxDepth: 5, into: &dockItems)
 
         for item in dockItems {
             var badgeRef: CFTypeRef?
@@ -243,6 +330,31 @@ public final class AXWindowController {
             }
             return false
         } ?? windows.first
+    }
+
+    public static func window(for pid: pid_t, matchingFrameQuartz expectedFrame: CGRect?) -> AXUIElement? {
+        guard let expectedFrame else { return primaryWindow(for: pid) }
+        let axApp = AXUIElementCreateApplication(pid)
+        guard let windows = copyWindows(axApp), !windows.isEmpty else {
+            return primaryWindow(for: pid)
+        }
+        var bestWin: AXUIElement?
+        var bestScore = CGFloat.greatestFiniteMagnitude
+        for win in windows where !isMinimized(win) {
+            guard let f = frame(of: win), f.width >= 120, f.height >= 120 else { continue }
+            let score = abs(f.origin.x - expectedFrame.origin.x)
+                + abs(f.origin.y - expectedFrame.origin.y)
+                + abs(f.width - expectedFrame.width)
+                + abs(f.height - expectedFrame.height)
+            if score < bestScore {
+                bestScore = score
+                bestWin = win
+            }
+        }
+        if let bestWin, bestScore <= 60 {
+            return bestWin
+        }
+        return primaryWindow(for: pid)
     }
 
     public static func windowTitle(of window: AXUIElement) -> String {
@@ -387,8 +499,14 @@ public final class AXWindowController {
                 }
             }
         } else {
-            sizeErr = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
-            posErr = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
+            let movingOriginFirst = current.map { rounded.minX < $0.minX || rounded.minY < $0.minY } ?? true
+            if movingOriginFirst {
+                posErr = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
+                sizeErr = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
+            } else {
+                sizeErr = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
+                posErr = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
+            }
         }
 
         if let after = frame(of: window),
@@ -396,6 +514,7 @@ public final class AXWindowController {
             || abs(after.origin.y - rounded.origin.y) > tolerance
             || abs(after.size.width - rounded.size.width) > tolerance
             || abs(after.size.height - rounded.size.height) > tolerance {
+            _ = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
             _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
             _ = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
         }

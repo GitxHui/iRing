@@ -199,9 +199,42 @@ public enum DisplayGeometry {
         ).integral
     }
 
-    /// Top inset of the expanded island when there is no camera notch to clear. The title
-    /// header (app name + "…") was removed; "…" now lives in the tray after "+".
-    public static let islandHeaderInset: CGFloat = 12
+    /// Top inset of the expanded island when there is no camera notch to clear.
+    public static let islandHeaderInset: CGFloat = 4
+
+    /// Outer breathing room between the running-indicator dot and the island rim.
+    public static let islandIndicatorOuterPadding: CGFloat = 3.5
+    /// Gap between the icon tile (`iconSize + 4`) and the indicator slot on horizontal islands.
+    public static let horizontalIndicatorGap: CGFloat = 0.5
+    /// Gap between the icon tile (`iconSize + 4`) and the indicator slot on vertical islands.
+    public static let verticalIndicatorGap: CGFloat = 1.5
+
+    /// Symmetric inset (above and below the icon tile) for horizontal expanded islands without a notch.
+    public static func horizontalIslandEdgeInset(for settings: StageSettings) -> CGFloat {
+        let iconSz = CGFloat(settings.iconSize)
+        let showDot = settings.indicatorStyle != .hidden
+        guard showDot else {
+            return max(4, round(iconSz * 0.14))
+        }
+        let dotH = max(4, CGFloat(settings.effectiveIndicatorSize))
+        return ceil(horizontalIndicatorGap + dotH + islandIndicatorOuterPadding)
+    }
+
+    /// Symmetric inset (left and right of the icon tile) for vertical expanded islands.
+    public static func verticalIslandEdgeInset(for settings: StageSettings) -> CGFloat {
+        let iconSz = CGFloat(settings.iconSize)
+        let showDot = settings.indicatorStyle != .hidden
+        guard showDot else {
+            return max(4, round(iconSz * 0.14))
+        }
+        let dotW = max(4, CGFloat(settings.effectiveIndicatorSize))
+        return ceil(verticalIndicatorGap + dotW + islandIndicatorOuterPadding)
+    }
+
+    public static func magnificationOverflow(settings: StageSettings) -> CGFloat {
+        guard settings.magnificationScale > 1.01 else { return 0 }
+        return ceil(CGFloat(settings.iconSize) * CGFloat(settings.magnificationScale - 1.0) * 0.65)
+    }
 
     public static func minExpandedIslandDepth(
         settings: StageSettings,
@@ -209,13 +242,14 @@ public enum DisplayGeometry {
         isVerticalTray: Bool
     ) -> CGFloat {
         let iconSz = CGFloat(settings.iconSize)
+        let pillSpan = iconSz + 4
         if isVerticalTray {
-            return ceil(iconSz + 36)
+            let sideInset = verticalIslandEdgeInset(for: settings)
+            return ceil(sideInset + pillSpan + sideInset)
         }
-        let pillH = iconSz + 10
-        let dotH = max(5, CGFloat(settings.effectiveIndicatorSize) + 2)
-        let gap = max(2, round(iconSz * 0.055))
-        return ceil(topBand + pillH + gap + dotH + 14)
+        let edgeInset = horizontalIslandEdgeInset(for: settings)
+        let effectiveTop = max(topBand, edgeInset)
+        return ceil(effectiveTop + pillSpan + edgeInset)
     }
 
     public static func dynamicIslandFramesQuartz(
@@ -229,10 +263,7 @@ public enum DisplayGeometry {
         let stage = fullStageFrameQuartz(on: screen, margin: margin)
         let edge = settings.islandPosition
 
-        let iconBand = CGFloat(settings.iconSize) + max(28, CGFloat(settings.iconSize) * 0.52)
-        let magHeadroom: CGFloat = settings.magnificationScale > 1.01
-            ? ceil(CGFloat(settings.iconSize) * CGFloat(settings.magnificationScale - 1.0) * 0.65) + 8
-            : 0
+        let magOverflow = magnificationOverflow(settings: settings)
         let isPerp = (settings.islandExpandAxis == .perpendicular)
 
         switch edge {
@@ -259,17 +290,16 @@ public enum DisplayGeometry {
 
             let topNotchBand: CGFloat = screen.notchWidth > 0 ? max(32, screen.safeAreaTop) : islandHeaderInset
             if isPerp {
-                let minSafeW = max(screen.notchWidth > 0 ? round(screen.notchWidth + 16) : 64, minExpandedIslandDepth(settings: settings, topBand: 0, isVerticalTray: true))
-                let baseW = round(iconBand + magHeadroom + 26)
-                let autoWidth = max(minSafeW, screen.notchWidth > 0 ? max(baseW, round(screen.notchWidth + 16)) : baseW)
+                let minSafeW = max(screen.notchWidth > 0 ? round(screen.notchWidth + 16) : 44, minExpandedIslandDepth(settings: settings, topBand: 0, isVerticalTray: true))
+                let autoWidth = minSafeW + magOverflow
                 let maxW = min(260, vis.width - 48)
                 let width = settings.islandCustomWidth > 1
                     ? min(maxW, max(minSafeW, round(CGFloat(settings.islandCustomWidth))))
                     : autoWidth
-                let maxH = max(300, vis.height - 48)
-                let autoHeight = min(max(300, desiredExpandedWidth + topNotchBand), maxH)
+                let maxH = max(200, vis.height - 48)
+                let autoHeight = min(max(140, desiredExpandedWidth + topNotchBand), maxH)
                 let height = settings.islandCustomHeight > 1
-                    ? min(maxH, max(220, round(CGFloat(settings.islandCustomHeight))))
+                    ? min(maxH, max(140, round(CGFloat(settings.islandCustomHeight))))
                     : autoHeight
                 let island = CGRect(
                     x: round(screen.frameQuartz.midX - width / 2),
@@ -281,15 +311,15 @@ public enum DisplayGeometry {
             }
 
             let minSafeTopH = minExpandedIslandDepth(settings: settings, topBand: topNotchBand, isVerticalTray: false)
-            let autoHeight = max(minSafeTopH, round(topNotchBand + 8 + iconBand + magHeadroom))
+            let autoHeight = minSafeTopH + magOverflow
             let maxCustomH = max(minSafeTopH, min(260, vis.height - 48))
             let height = settings.islandCustomHeight > 1
                 ? min(maxCustomH, max(minSafeTopH, round(CGFloat(settings.islandCustomHeight))))
                 : autoHeight
-            let minExpandedW: CGFloat = screen.notchWidth > 0 ? max(420, screen.notchWidth + 230) : 320
+            let minExpandedW: CGFloat = screen.notchWidth > 0 ? max(220, screen.notchWidth + 40) : 140
             let maxW = max(minExpandedW, vis.width - 40)
             let autoWidth = min(max(minExpandedW, desiredExpandedWidth), maxW)
-            let minCustomW: CGFloat = screen.notchWidth > 0 ? max(280, round(screen.notchWidth + 120)) : 260
+            let minCustomW: CGFloat = screen.notchWidth > 0 ? max(220, round(screen.notchWidth + 40)) : 140
             let width = settings.islandCustomWidth > 1
                 ? min(maxW, max(minCustomW, round(CGFloat(settings.islandCustomWidth))))
                 : autoWidth
@@ -316,15 +346,15 @@ public enum DisplayGeometry {
 
             if isPerp {
                 let minSafeW = minExpandedIslandDepth(settings: settings, topBand: 0, isVerticalTray: true)
-                let autoWidth = max(minSafeW, round(iconBand + magHeadroom + 24))
+                let autoWidth = minSafeW + magOverflow
                 let maxW = min(260, vis.width - 48)
                 let width = settings.islandCustomWidth > 1
                     ? min(maxW, max(minSafeW, round(CGFloat(settings.islandCustomWidth))))
                     : autoWidth
-                let maxH = max(300, vis.height - 48)
-                let autoHeight = min(max(300, desiredExpandedWidth), maxH)
+                let maxH = max(200, vis.height - 48)
+                let autoHeight = min(max(140, desiredExpandedWidth), maxH)
                 let height = settings.islandCustomHeight > 1
-                    ? min(maxH, max(220, round(CGFloat(settings.islandCustomHeight))))
+                    ? min(maxH, max(140, round(CGFloat(settings.islandCustomHeight))))
                     : autoHeight
                 let island = CGRect(
                     x: round(vis.midX - width / 2),
@@ -336,15 +366,15 @@ public enum DisplayGeometry {
             }
 
             let minSafeBotH = minExpandedIslandDepth(settings: settings, topBand: islandHeaderInset, isVerticalTray: false)
-            let autoHeight = max(minSafeBotH, round(islandHeaderInset + 8 + iconBand + magHeadroom))
+            let autoHeight = minSafeBotH + magOverflow
             let maxCustomH = max(minSafeBotH, min(260, vis.height - 48))
             let height = settings.islandCustomHeight > 1
                 ? min(maxCustomH, max(minSafeBotH, round(CGFloat(settings.islandCustomHeight))))
                 : autoHeight
-            let maxW = max(320, vis.width - 40)
-            let autoWidth = min(max(320, desiredExpandedWidth), maxW)
+            let maxW = max(140, vis.width - 40)
+            let autoWidth = min(max(140, desiredExpandedWidth), maxW)
             let width = settings.islandCustomWidth > 1
-                ? min(maxW, max(260, round(CGFloat(settings.islandCustomWidth))))
+                ? min(maxW, max(140, round(CGFloat(settings.islandCustomWidth))))
                 : autoWidth
             let island = CGRect(
                 x: round(vis.midX - width / 2),
@@ -369,15 +399,15 @@ public enum DisplayGeometry {
 
             if isPerp {
                 let minSafeLeftH = minExpandedIslandDepth(settings: settings, topBand: islandHeaderInset, isVerticalTray: false)
-                let autoHeight = max(minSafeLeftH, round(islandHeaderInset + 8 + iconBand + magHeadroom))
+                let autoHeight = minSafeLeftH + magOverflow
                 let maxCustomH = max(minSafeLeftH, min(260, vis.height - 48))
                 let height = settings.islandCustomHeight > 1
                     ? min(maxCustomH, max(minSafeLeftH, round(CGFloat(settings.islandCustomHeight))))
                     : autoHeight
-                let maxW = max(320, vis.width - 48)
-                let autoWidth = min(max(320, desiredExpandedWidth), maxW)
+                let maxW = max(140, vis.width - 48)
+                let autoWidth = min(max(140, desiredExpandedWidth), maxW)
                 let width = settings.islandCustomWidth > 1
-                    ? min(maxW, max(260, round(CGFloat(settings.islandCustomWidth))))
+                    ? min(maxW, max(140, round(CGFloat(settings.islandCustomWidth))))
                     : autoWidth
                 let island = CGRect(
                     x: vis.minX,
@@ -389,15 +419,15 @@ public enum DisplayGeometry {
             }
 
             let minSafeLeftW = minExpandedIslandDepth(settings: settings, topBand: 0, isVerticalTray: true)
-            let autoWidth = max(minSafeLeftW, round(iconBand + magHeadroom + 20))
+            let autoWidth = minSafeLeftW + magOverflow
             let maxW = min(260, vis.width - 48)
             let width = settings.islandCustomWidth > 1
                 ? min(maxW, max(minSafeLeftW, round(CGFloat(settings.islandCustomWidth))))
                 : autoWidth
-            let maxH = max(300, vis.height - 48)
-            let autoHeight = min(max(300, desiredExpandedWidth), maxH)
+            let maxH = max(200, vis.height - 48)
+            let autoHeight = min(max(140, desiredExpandedWidth), maxH)
             let height = settings.islandCustomHeight > 1
-                ? min(maxH, max(220, round(CGFloat(settings.islandCustomHeight))))
+                ? min(maxH, max(140, round(CGFloat(settings.islandCustomHeight))))
                 : autoHeight
             let island = CGRect(
                 x: vis.minX,
@@ -422,15 +452,15 @@ public enum DisplayGeometry {
 
             if isPerp {
                 let minSafeRightH = minExpandedIslandDepth(settings: settings, topBand: islandHeaderInset, isVerticalTray: false)
-                let autoHeight = max(minSafeRightH, round(islandHeaderInset + 8 + iconBand + magHeadroom))
+                let autoHeight = minSafeRightH + magOverflow
                 let maxCustomH = max(minSafeRightH, min(260, vis.height - 48))
                 let height = settings.islandCustomHeight > 1
                     ? min(maxCustomH, max(minSafeRightH, round(CGFloat(settings.islandCustomHeight))))
                     : autoHeight
-                let maxW = max(320, vis.width - 48)
-                let autoWidth = min(max(320, desiredExpandedWidth), maxW)
+                let maxW = max(140, vis.width - 48)
+                let autoWidth = min(max(140, desiredExpandedWidth), maxW)
                 let width = settings.islandCustomWidth > 1
-                    ? min(maxW, max(260, round(CGFloat(settings.islandCustomWidth))))
+                    ? min(maxW, max(140, round(CGFloat(settings.islandCustomWidth))))
                     : autoWidth
                 let island = CGRect(
                     x: vis.maxX - width,
@@ -442,15 +472,15 @@ public enum DisplayGeometry {
             }
 
             let minSafeRightW = minExpandedIslandDepth(settings: settings, topBand: 0, isVerticalTray: true)
-            let autoWidth = max(minSafeRightW, round(iconBand + magHeadroom + 20))
+            let autoWidth = minSafeRightW + magOverflow
             let maxW = min(260, vis.width - 48)
             let width = settings.islandCustomWidth > 1
                 ? min(maxW, max(minSafeRightW, round(CGFloat(settings.islandCustomWidth))))
                 : autoWidth
-            let maxH = max(300, vis.height - 48)
-            let autoHeight = min(max(300, desiredExpandedWidth), maxH)
+            let maxH = max(200, vis.height - 48)
+            let autoHeight = min(max(140, desiredExpandedWidth), maxH)
             let height = settings.islandCustomHeight > 1
-                ? min(maxH, max(220, round(CGFloat(settings.islandCustomHeight))))
+                ? min(maxH, max(140, round(CGFloat(settings.islandCustomHeight))))
                 : autoHeight
             let island = CGRect(
                 x: vis.maxX - width,
@@ -589,30 +619,6 @@ public enum DisplayGeometry {
             let botH = base.height - gap - topH
             return CGRect(x: rr.minX, y: base.minY + topH + gap, width: rr.width, height: max(220, botH)).integral
 
-        case .leftThird:
-            let thirdW = max(280, floor((base.width - gap * 2) / 3))
-            return CGRect(x: base.minX, y: base.minY, width: thirdW, height: base.height).integral
-
-        case .centerThird:
-            let thirdW = max(280, floor((base.width - gap * 2) / 3))
-            return CGRect(x: base.minX + thirdW + gap, y: base.minY, width: thirdW, height: base.height).integral
-
-        case .rightThird:
-            let thirdW = max(280, floor((base.width - gap * 2) / 3))
-            let x = base.minX + (thirdW + gap) * 2
-            let w = max(280, base.maxX - x)
-            return CGRect(x: x, y: base.minY, width: w, height: base.height).integral
-
-        case .leftTwoThirds:
-            let thirdW = max(280, floor((base.width - gap * 2) / 3))
-            return CGRect(x: base.minX, y: base.minY, width: thirdW * 2 + gap, height: base.height).integral
-
-        case .rightTwoThirds:
-            let thirdW = max(280, floor((base.width - gap * 2) / 3))
-            let x = base.minX + thirdW + gap
-            let w = max(320, base.maxX - x)
-            return CGRect(x: x, y: base.minY, width: w, height: base.height).integral
-
         case .maximize:
             return screen.visibleFrameQuartz.integral
 
@@ -638,9 +644,9 @@ public enum DisplayGeometry {
 
         let x: CGFloat
         switch anchor {
-        case .leftHalf, .leftThird, .leftTwoThirds, .topLeftQuarter, .bottomLeftQuarter:
+        case .leftHalf, .topLeftQuarter, .bottomLeftQuarter:
             x = rect.minX
-        case .rightHalf, .rightThird, .rightTwoThirds, .topRightQuarter, .bottomRightQuarter:
+        case .rightHalf, .topRightQuarter, .bottomRightQuarter:
             x = rect.maxX - targetW
         default:
             x = rect.midX - targetW * 0.5
@@ -661,12 +667,28 @@ public enum DisplayGeometry {
         return CGRect(x: clampedX, y: clampedY, width: targetW, height: targetH).integral
     }
 
-    /// Loop-style 8-direction compass + center deadzone + outer third-ring geometry.
+    public static func adjustedWindowScale(
+        current: CGFloat,
+        pointerDeltaY: CGFloat
+    ) -> CGFloat {
+        let next = current + pointerDeltaY / 240.0
+        return min(1.0, max(0.45, next))
+    }
+
+    public static func adjustedWindowScale(
+        current: CGFloat,
+        scrollDelta: CGFloat,
+        precise: Bool
+    ) -> CGFloat {
+        let step: CGFloat = precise ? (scrollDelta / 180.0) : (scrollDelta > 0 ? 0.05 : -0.05)
+        return min(1.0, max(0.45, current + step))
+    }
+
+    /// Loop-style 8-direction compass (4 halves + 4 quarters) + center deadzone.
     public static func loopSplitTarget(
         from anchorAppKit: CGPoint,
         to currentAppKit: CGPoint,
         deadzoneRadius: CGFloat = 24,
-        outerThirdRadius: CGFloat = 148,
         centerDefault: RadialLayoutTarget = .maximize
     ) -> (target: RadialLayoutTarget, sectorIndex: Int?, angleDegrees: Double, isOuterRing: Bool) {
         let dx = currentAppKit.x - anchorAppKit.x
@@ -684,22 +706,21 @@ public enum DisplayGeometry {
         if relative < 0 { relative += twoPi }
 
         let sector = min(7, max(0, Int(floor(relative / step))))
-        let isOuter = distance >= outerThirdRadius
         let wedgeDeg = Double(sector) * 45.0
 
         let target: RadialLayoutTarget
         switch sector {
-        case 0: target = isOuter ? .maximize : .topHalf
+        case 0: target = .topHalf
         case 1: target = .topRightQuarter
-        case 2: target = isOuter ? .rightThird : .rightHalf
+        case 2: target = .rightHalf
         case 3: target = .bottomRightQuarter
-        case 4: target = isOuter ? .centerThird : .bottomHalf
+        case 4: target = .bottomHalf
         case 5: target = .bottomLeftQuarter
-        case 6: target = isOuter ? .leftThird : .leftHalf
+        case 6: target = .leftHalf
         case 7: target = .topLeftQuarter
         default: target = centerDefault
         }
-        return (target, sector, wedgeDeg, isOuter)
+        return (target, sector, wedgeDeg, false)
     }
 
     public static func radialPanelRectAppKit(
@@ -787,6 +808,49 @@ public enum DisplayGeometry {
         return (left, right)
     }
 
+    public enum WindowSwitchAction: Equatable, Sendable {
+        case preserveExisting
+        case moveToScreenPreservingSize(CGRect)
+        case fitToStage
+    }
+
+    public static func resolveWindowSwitchAction(
+        autoFitWindowOnSwitch: Bool,
+        pullCrossScreenAppsToIsland: Bool,
+        existingFrameQuartz: CGRect?,
+        windowScreenID: String?,
+        dockScreen: ScreenInfo?,
+        hasExplicitOverrideFrame: Bool,
+        forceAlignToDockScreen: Bool
+    ) -> WindowSwitchAction {
+        if hasExplicitOverrideFrame || forceAlignToDockScreen {
+            return .fitToStage
+        }
+        guard let frame = existingFrameQuartz, !frame.isEmpty else {
+            return autoFitWindowOnSwitch ? .fitToStage : .preserveExisting
+        }
+        let isOnOtherScreen = (windowScreenID != nil && dockScreen != nil && windowScreenID != dockScreen!.id)
+        if isOnOtherScreen {
+            if !pullCrossScreenAppsToIsland {
+                return .preserveExisting
+            }
+            if autoFitWindowOnSwitch {
+                return .fitToStage
+            }
+            let vis = dockScreen!.visibleFrameQuartz
+            let w = min(frame.width, vis.width)
+            let h = min(frame.height, vis.height)
+            let moved = CGRect(
+                x: vis.midX - w / 2.0,
+                y: vis.midY - h / 2.0,
+                width: w,
+                height: h
+            ).integral
+            return .moveToScreenPreservingSize(moved)
+        }
+        return autoFitWindowOnSwitch ? .fitToStage : .preserveExisting
+    }
+
     public static func shouldPreserveExistingWindowFrame(
         policy: MultiScreenAppPolicy,
         windowScreenID: String?,
@@ -805,6 +869,29 @@ public enum DisplayGeometry {
             guard let dockScreenID else { return false }
             return windowScreenID != dockScreenID
         }
+    }
+
+    /// Returns `true` only when committing an app from the radial ring should apply an explicit
+    /// resize/split/pinned fill frame instead of preserving the app's own screen and window geometry.
+    public static func shouldPassOverrideFrameOnAppCommit(
+        layout: RadialLayoutTarget,
+        pinnedFillFrame: CGRect?,
+        customWindowScale: CGFloat
+    ) -> Bool {
+        layout != .stage || pinnedFillFrame != nil || customWindowScale < 0.999
+    }
+
+    /// Resolves which display's other staged apps may be hidden; on multi-display systems, never
+    /// falls back to the dock display if the target app's display cannot be confirmed.
+    public static func effectiveHideTargetScreenID(
+        explicitScreenID: String?,
+        targetAppLiveScreenID: String?,
+        dockScreenID: String?,
+        screenCount: Int
+    ) -> String? {
+        if let explicitScreenID { return explicitScreenID }
+        if let targetAppLiveScreenID { return targetAppLiveScreenID }
+        return screenCount <= 1 ? dockScreenID : nil
     }
 
     /// Returns `true` only when hiding the process cannot vanish any visible window on another display.

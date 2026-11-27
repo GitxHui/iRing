@@ -52,6 +52,27 @@ public final class StageCoordinator: ObservableObject {
         return runningDisplayedApps + inactiveDisplayedApps
     }
 
+    public var collapsedIconApps: (active: StageAppItem?, runningOthers: [StageAppItem]) {
+        let runningIDs = Set(apps.map(\.bundleIdentifier).filter { runtimeInfo[$0]?.isRunning == true })
+        let res = StageSettings.orderedCollapsedIslandApps(
+            apps: apps,
+            activeBundleID: activeBundleID,
+            runningBundleIDs: runningIDs,
+            sortRunningFirst: settings.sortRunningAppsFirst
+        )
+        return (res.active, res.runningOthers)
+    }
+
+    public var numberShortcutApps: [StageAppItem] {
+        let runningIDs = Set(apps.map(\.bundleIdentifier).filter { runtimeInfo[$0]?.isRunning == true })
+        return StageSettings.orderedCollapsedIslandApps(
+            apps: apps,
+            activeBundleID: activeBundleID,
+            runningBundleIDs: runningIDs,
+            sortRunningFirst: settings.sortRunningAppsFirst
+        ).allSlots
+    }
+
     public var radialDisplayedApps: [StageAppItem] {
         let runningIDs = Set(apps.map(\.bundleIdentifier).filter { isAppConsideredRunning($0) })
         return StageSettings.orderedRadialApps(
@@ -100,11 +121,14 @@ public final class StageCoordinator: ObservableObject {
     public var onDockCornerRadiusShouldUpdate: ((CGFloat) -> Void)?
     public var onDockWindowLevelShouldUpdate: ((Bool) -> Void)?
     public var onMenuBarVisibilityShouldChange: ((Bool) -> Void)?
+    public var onLanguageDidChange: (() -> Void)?
     public var onRadialKeyboardTriggerPressed: (() -> Void)?
     public var onRadialKeyboardTriggerReleased: (() -> Void)?
     public var onSplitRingHotkeyPressed: (() -> Void)?
     public var onSplitRingHotkeyReleased: (() -> Void)?
     public var onOpenSettingsRequested: (() -> Void)?
+    public var onOpenAddAppRequested: (() -> Void)?
+    public var onAccessibilityTrustChanged: ((Bool) -> Void)?
     public var onPlayWindowPopTransition: ((WindowPopAnimationStyle, StageAppItem, CGImage?, CGRect, CGRect, Double, @escaping () -> Void) -> Void)?
 
     // MARK: - Services
@@ -128,6 +152,8 @@ public final class StageCoordinator: ObservableObject {
     private var statusTimer: Timer?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var distributedObserver: NSObjectProtocol?
+    private var cachedLSBadgeSnapshot = AXWindowController.DockBadgeSnapshot()
+    private var isFetchingLSBadges = false
 
     private static let excludedBundleIDs: Set<String> = []
 
@@ -271,22 +297,23 @@ public final class StageCoordinator: ObservableObject {
     }
 
     public func estimatedDockLength() -> CGFloat {
-        let separatorExtra: CGFloat = (settings.sortRunningAppsFirst && !runningDisplayedApps.isEmpty && !inactiveDisplayedApps.isEmpty) ? 12 : 0
-        let spacing = CGFloat(settings.iconSpacing)
+        let separatorExtra: CGFloat = (settings.sortRunningAppsFirst && !runningDisplayedApps.isEmpty && !inactiveDisplayedApps.isEmpty) ? 7 : 0
         let iconSz = CGFloat(settings.iconSize)
-        let itemCount = CGFloat(max(1, min(apps.count, 10)))
-        let addExtra: CGFloat = (iconSz + 10 + spacing) * 2  // "+" and settings buttons share icon cell footprint
-        let pad = max(8, CGFloat(settings.islandContentPadding))
-        let flareExtra: CGFloat = 28
+        let spacing = max(2, round(iconSz * 0.05))
+        let pad = max(4, round(iconSz * 0.13))
+        let itemCount = CGFloat(max(1, apps.count))
+        let pillSpan = iconSz + 4
+        let pitch = pillSpan + spacing
+        let flare = min(12, max(9, round(iconSz * 0.25)))
+        let flareExtra: CGFloat = flare * 2
+        let contentLen = flareExtra + pad * 2 + (itemCount + 2) * pitch - spacing + separatorExtra
 
         switch settings.dockShape {
         case .dynamicIsland:
             if settings.isExpandedIslandVertical {
-                let pitch = iconSz + 14 + spacing
-                return min(840, max(320, flareExtra + pad * 2 + 20 + itemCount * pitch + separatorExtra + addExtra))
+                return min(960, max(140, contentLen))
             } else {
-                let pitch = iconSz + 10 + spacing
-                return min(960, max(340, flareExtra + pad * 2 + 8 + itemCount * pitch + separatorExtra + addExtra))
+                return min(1200, max(140, contentLen))
             }
         case .radialOnly:
             return CGFloat(settings.radialRingDiameter)
@@ -377,7 +404,7 @@ public final class StageCoordinator: ObservableObject {
         if settings.followActiveScreen {
             syncPinnedScreenToMouseIfNeeded()
         }
-        let ordered = displayedApps
+        let ordered = numberShortcutApps
         guard index >= 0, index < ordered.count else { return }
         switchToApp(bundleID: ordered[index].bundleIdentifier)
     }
@@ -446,70 +473,126 @@ public final class StageCoordinator: ObservableObject {
         }
 
         let screens = DisplayGeometry.allScreens()
-        let dockScreenID = resolvedScreen()?.id
+        let dockScreen = resolvedScreen()
+        let dockScreenID = dockScreen?.id
         let primaryHeight = DisplayGeometry.primaryScreenHeight()
         let shouldHideOthers = settings.hideInactiveStagedApps && !isSplitLayout
         let isSameAppResizing = (previousActiveBundleID == bundleID && overrideFrameQuartz != nil)
         let popDuration = settings.windowPopAnimationStyle.effectiveDuration(speed: settings.animationSpeed)
-        let canAnimatePop = sourceIconRectAppKit != nil
+        let canAnimatePop = false && popDuration > 0.02
+            && sourceIconRectAppKit != nil
             && !isSameAppResizing
-            && popDuration > 0.02
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             && onPlayWindowPopTransition != nil
 
+        var resolvedMoveFrame: CGRect? = nil
+
         if let running = AXWindowController.runningApp(bundleIdentifier: bundleID) {
+            if running.isHidden && overrideFrameQuartz == nil && !forceAlignToDockScreen
+                && (!settings.autoFitWindowOnSwitch || !settings.pullCrossScreenAppsToIsland) {
+                running.unhide()
+            }
             let win = isAccessibilityTrusted ? AXWindowController.primaryWindow(for: running.processIdentifier) : nil
-            let existingFrame = win.flatMap { AXWindowController.frame(of: $0) }
-                ?? AXWindowController.onScreenWindowFramesQuartz(for: running.processIdentifier).first
-            if let existingFrame {
-                let winScreenID = DisplayGeometry.screen(containingQuartzRect: existingFrame, screens: screens)?.id
-                if DisplayGeometry.shouldPreserveExistingWindowFrame(
-                    policy: settings.multiScreenAppPolicy,
-                    windowScreenID: winScreenID,
-                    dockScreenID: dockScreenID,
-                    hasExplicitOverrideFrame: overrideFrameQuartz != nil,
-                    forceAlignToDockScreen: forceAlignToDockScreen
-                ) {
-                    if canAnimatePop, let sourceRect = sourceIconRectAppKit {
-                        let snapshot = snapshotCache.cachedSnapshot(for: bundleID)
-                        let targetAppKit = DisplayGeometry.quartzToAppKit(existingFrame, primaryHeight: primaryHeight)
-                        onPlayWindowPopTransition?(
-                            settings.windowPopAnimationStyle,
-                            item,
-                            snapshot?.image,
-                            sourceRect,
-                            targetAppKit,
-                            popDuration
-                        ) { [weak self] in
-                            guard let self,
-                                  self.windowAlignGeneration == gen,
-                                  self.activeBundleID == bundleID
-                            else { return }
-                            AXWindowController.activateApplication(running, window: win, appURL: item.appURL)
-                            if shouldHideOthers {
-                                self.scheduleHideOtherStagedApps(except: item.bundleIdentifier, onScreenID: winScreenID)
-                            }
-                            self.scheduleSnapshotRefresh(for: item.bundleIdentifier, generation: gen)
-                        }
-                    } else {
+            let existingFrame = liveWindowFrameQuartz(for: running.processIdentifier, preferredWindow: win)
+            let winScreenID = existingFrame.flatMap { DisplayGeometry.screen(containingQuartzRect: $0, screens: screens)?.id }
+
+            let switchAction = DisplayGeometry.resolveWindowSwitchAction(
+                autoFitWindowOnSwitch: settings.autoFitWindowOnSwitch,
+                pullCrossScreenAppsToIsland: settings.pullCrossScreenAppsToIsland,
+                existingFrameQuartz: existingFrame,
+                windowScreenID: winScreenID,
+                dockScreen: dockScreen,
+                hasExplicitOverrideFrame: overrideFrameQuartz != nil,
+                forceAlignToDockScreen: forceAlignToDockScreen
+            )
+
+            switch switchAction {
+            case .preserveExisting:
+                if let win {
+                    AXWindowController.unminimizeIfNeeded(win)
+                }
+                if canAnimatePop, let sourceRect = sourceIconRectAppKit, let existingFrame {
+                    let snapshot = snapshotCache.cachedSnapshot(for: bundleID)
+                    let targetAppKit = DisplayGeometry.quartzToAppKit(existingFrame, primaryHeight: primaryHeight)
+                    onPlayWindowPopTransition?(
+                        settings.windowPopAnimationStyle,
+                        item,
+                        snapshot?.image,
+                        sourceRect,
+                        targetAppKit,
+                        popDuration
+                    ) { [weak self] in
+                        guard let self,
+                              self.windowAlignGeneration == gen,
+                              self.activeBundleID == bundleID
+                        else { return }
                         AXWindowController.activateApplication(running, window: win, appURL: item.appURL)
+                        if shouldHideOthers {
+                            self.scheduleHideOtherStagedApps(except: item.bundleIdentifier, onScreenID: winScreenID)
+                        }
+                        self.scheduleSnapshotRefresh(for: item.bundleIdentifier, generation: gen)
+                    }
+                } else {
+                    AXWindowController.activateApplication(running, window: win, appURL: item.appURL)
+                    if existingFrame != nil {
                         if shouldHideOthers {
                             scheduleHideOtherStagedApps(except: item.bundleIdentifier, onScreenID: winScreenID)
                         }
-                        scheduleSnapshotRefresh(for: item.bundleIdentifier, generation: gen)
+                    } else {
+                        scheduleDeferredFocusFollowUp(
+                            bundleID: item.bundleIdentifier,
+                            pid: running.processIdentifier,
+                            shouldHideOthers: shouldHideOthers,
+                            generation: gen
+                        )
                     }
+                    scheduleSnapshotRefresh(for: item.bundleIdentifier, generation: gen)
+                }
+                if let existingFrame {
                     warpCursorToCenterIfNeeded(of: existingFrame)
-                    scheduleSave()
-                    return
+                }
+                scheduleSave()
+                return
+
+            case .moveToScreenPreservingSize(let movedFrame):
+                resolvedMoveFrame = movedFrame
+
+            case .fitToStage:
+                resolvedMoveFrame = nil
+            }
+        } else if !settings.autoFitWindowOnSwitch && overrideFrameQuartz == nil && !forceAlignToDockScreen {
+            // Launch cleanly without forcing window resize
+            launchingBundleIDs.insert(item.bundleIdentifier)
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: item.appURL, configuration: config) { [weak self] app, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let error {
+                        NSLog("[AIStage] Failed to launch \(item.displayName): \(error.localizedDescription)")
+                    }
+                    self.launchingBundleIDs.remove(item.bundleIdentifier)
+                    self.refreshRuntimeInfo()
+                    if let launchedPID = app?.processIdentifier
+                        ?? AXWindowController.runningApp(bundleIdentifier: item.bundleIdentifier)?.processIdentifier {
+                        self.scheduleDeferredFocusFollowUp(
+                            bundleID: item.bundleIdentifier,
+                            pid: launchedPID,
+                            shouldHideOthers: shouldHideOthers,
+                            generation: gen
+                        )
+                    }
                 }
             }
+            scheduleSave()
+            return
         }
 
-        let stage = overrideFrameQuartz ?? currentLockedStageFrameQuartz()
+        let stage = overrideFrameQuartz ?? resolvedMoveFrame ?? currentLockedStageFrameQuartz()
         let targetAlignScreenID = DisplayGeometry.screen(containingQuartzRect: stage, screens: screens)?.id ?? dockScreenID
-        let shouldSmoothResize = overrideFrameQuartz != nil
+        let shouldSmoothResize = (overrideFrameQuartz != nil || resolvedMoveFrame != nil)
             && settings.smoothWindowTransitions
-            && !settings.animationSpeed.isInstant
+            && !settings.ringAnimationSpeed.isInstant
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         if canAnimatePop, let sourceRect = sourceIconRectAppKit {
@@ -568,8 +651,11 @@ public final class StageCoordinator: ObservableObject {
         if !isAccessibilityTrusted {
             isAccessibilityTrusted = AXWindowController.isAccessibilityTrusted(promptIfNeeded: false)
         }
-        guard isAccessibilityTrusted,
-              let targetQuartz = overrideFrameQuartz ?? radialTargetFrameQuartz(screenID: screenID, layout: layout),
+        guard isAccessibilityTrusted else {
+            NSLog("[AIStage] Split skipped: Accessibility permission not trusted")
+            return
+        }
+        guard let targetQuartz = overrideFrameQuartz ?? radialTargetFrameQuartz(screenID: screenID, layout: layout),
               let front = NSWorkspace.shared.frontmostApplication,
               front.bundleIdentifier != Bundle.main.bundleIdentifier
         else { return }
@@ -592,11 +678,11 @@ public final class StageCoordinator: ObservableObject {
 
         AXWindowController.unminimizeIfNeeded(win)
         let smooth = settings.smoothWindowTransitions
-            && !settings.animationSpeed.isInstant
+            && !settings.ringAnimationSpeed.isInstant
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         if smooth {
-            let duration = max(0.14, settings.animationSpeed.previewFrameDuration)
+            let duration = max(0.14, settings.ringAnimationSpeed.previewFrameDuration)
             frameAnimator.animate(
                 window: win,
                 pid: pid,
@@ -616,12 +702,20 @@ public final class StageCoordinator: ObservableObject {
     }
 
     /// Moves and resizes a specific running window (found under cursor) without hiding other windows.
-    public func applyFrameToWindow(pid: pid_t, frameQuartz: CGRect, screenID: String?) {
+    public func applyFrameToWindow(
+        pid: pid_t,
+        frameQuartz: CGRect,
+        screenID: String?,
+        preferredWindowFrameQuartz: CGRect? = nil
+    ) {
         if !isAccessibilityTrusted {
             isAccessibilityTrusted = AXWindowController.isAccessibilityTrusted(promptIfNeeded: false)
         }
-        guard isAccessibilityTrusted,
-              let running = NSRunningApplication(processIdentifier: pid),
+        guard isAccessibilityTrusted else {
+            NSLog("[AIStage] Split skipped: Accessibility permission not trusted")
+            return
+        }
+        guard let running = NSRunningApplication(processIdentifier: pid),
               running.bundleIdentifier != Bundle.main.bundleIdentifier
         else { return }
 
@@ -636,7 +730,7 @@ public final class StageCoordinator: ObservableObject {
         windowAlignGeneration &+= 1
         let gen = windowAlignGeneration
 
-        guard let win = AXWindowController.primaryWindow(for: pid),
+        guard let win = AXWindowController.window(for: pid, matchingFrameQuartz: preferredWindowFrameQuartz),
               !AXWindowController.isFullScreen(win)
         else { return }
 
@@ -644,11 +738,11 @@ public final class StageCoordinator: ObservableObject {
         AXWindowController.activateApplication(running, window: win, appURL: running.bundleURL)
 
         let smooth = settings.smoothWindowTransitions
-            && !settings.animationSpeed.isInstant
+            && !settings.ringAnimationSpeed.isInstant
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         if smooth {
-            let duration = max(0.14, settings.animationSpeed.previewFrameDuration)
+            let duration = max(0.14, settings.ringAnimationSpeed.previewFrameDuration)
             frameAnimator.animate(
                 window: win,
                 pid: pid,
@@ -657,12 +751,24 @@ public final class StageCoordinator: ObservableObject {
                 duration: duration
             ) { [weak self] _ in
                 AXWindowController.raise(win)
-                self?.scheduleFrameVerification(pid: pid, targetFrame: frameQuartz, generation: gen)
+                self?.scheduleFrameVerification(
+                    pid: pid,
+                    window: win,
+                    targetFrame: frameQuartz,
+                    generation: gen,
+                    delays: [0.08, 0.24, 0.45]
+                )
             }
         } else {
             AXWindowController.setFrame(frameQuartz, of: win, pid: pid)
             AXWindowController.raise(win)
-            scheduleFrameVerification(pid: pid, targetFrame: frameQuartz, generation: gen)
+            scheduleFrameVerification(
+                pid: pid,
+                window: win,
+                targetFrame: frameQuartz,
+                generation: gen,
+                delays: [0.08, 0.24, 0.45]
+            )
         }
         warpCursorToCenterIfNeeded(of: frameQuartz)
     }
@@ -859,6 +965,45 @@ public final class StageCoordinator: ObservableObject {
         scheduleSave()
     }
 
+    private func liveWindowFrameQuartz(for pid: pid_t, preferredWindow: AXUIElement? = nil) -> CGRect? {
+        if let preferredWindow, let frame = AXWindowController.frame(of: preferredWindow), !frame.isEmpty {
+            return frame
+        }
+        if isAccessibilityTrusted,
+           let win = AXWindowController.primaryWindow(for: pid),
+           let frame = AXWindowController.frame(of: win),
+           !frame.isEmpty {
+            return frame
+        }
+        return AXWindowController.onScreenWindowFramesQuartz(for: pid).first(where: { !$0.isEmpty })
+    }
+
+    private func scheduleDeferredFocusFollowUp(
+        bundleID: String,
+        pid: pid_t,
+        shouldHideOthers: Bool,
+        generation: UInt64
+    ) {
+        var didFollowUp = false
+        for delay in [0.08, 0.22] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      !didFollowUp,
+                      self.windowAlignGeneration == generation,
+                      self.activeBundleID == bundleID,
+                      let frame = self.liveWindowFrameQuartz(for: pid)
+                else { return }
+                didFollowUp = true
+                self.warpCursorToCenterIfNeeded(of: frame)
+                if shouldHideOthers {
+                    let screens = DisplayGeometry.allScreens()
+                    let screenID = DisplayGeometry.screen(containingQuartzRect: frame, screens: screens)?.id
+                    self.scheduleHideOtherStagedApps(except: bundleID, onScreenID: screenID)
+                }
+            }
+        }
+    }
+
     private func warpCursorToCenterIfNeeded(of frameQuartz: CGRect) {
         guard settings.moveCursorWithWindow, !frameQuartz.isEmpty else { return }
         CGWarpMouseCursorPosition(CGPoint(x: frameQuartz.midX, y: frameQuartz.midY))
@@ -977,6 +1122,35 @@ public final class StageCoordinator: ObservableObject {
         scheduleSave()
     }
 
+    @discardableResult
+    public func addCurrentlyRunningRegularApps(limit: Int = 6) -> Int {
+        let selfBID = Bundle.main.bundleIdentifier
+        var added = 0
+        for running in NSWorkspace.shared.runningApplications where running.activationPolicy == .regular {
+            guard added < limit else { break }
+            guard let bid = running.bundleIdentifier,
+                  bid != selfBID,
+                  bid != "com.iring.mac",
+                  bid != "com.aistage.mac",
+                  !Self.excludedBundleIDs.contains(bid),
+                  !apps.contains(where: { $0.bundleIdentifier == bid }),
+                  let url = running.bundleURL,
+                  let item = discovery.appItem(from: url)
+            else { continue }
+            apps.append(item)
+            added += 1
+        }
+        if added > 0 {
+            if activeBundleID == nil {
+                activeBundleID = apps.first?.bundleIdentifier
+            }
+            refreshRuntimeInfo()
+            syncDockFrame(animated: true)
+            scheduleSave()
+        }
+        return added
+    }
+
     public func removeApp(bundleID: String) {
         apps.removeAll { $0.bundleIdentifier == bundleID }
         if activeBundleID == bundleID {
@@ -1039,6 +1213,8 @@ public final class StageCoordinator: ObservableObject {
         let oldSplitRingEnabled = settings.splitRingHotkeyEnabled
         let oldSplitRingShortcut = settings.splitRingShortcut
         let oldNumMod = settings.numberSwitchModifier
+        let oldCustomNumMods = settings.customNumberSwitchModifiers
+        let oldLanguage = settings.language
         let oldIconSize = settings.iconSize
         let oldWidth = settings.dockWidth
         let oldHorizH = settings.horizontalDockHeight
@@ -1079,6 +1255,10 @@ public final class StageCoordinator: ObservableObject {
         if oldLaunchAtLogin != settings.launchAtLogin {
             syncLaunchAtLogin(enabled: settings.launchAtLogin)
         }
+        if oldLanguage != settings.language {
+            L10n.setLanguage(settings.language)
+            onLanguageDidChange?()
+        }
 
         if oldHotkey != settings.toggleHotkey
             || oldCustomToggle != settings.customToggleShortcut
@@ -1087,7 +1267,8 @@ public final class StageCoordinator: ObservableObject {
             || oldRadialKbShortcut != settings.radialKeyboardShortcut
             || oldSplitRingEnabled != settings.splitRingHotkeyEnabled
             || oldSplitRingShortcut != settings.splitRingShortcut
-            || oldNumMod != settings.numberSwitchModifier {
+            || oldNumMod != settings.numberSwitchModifier
+            || oldCustomNumMods != settings.customNumberSwitchModifiers {
             applyHotkeys()
         }
         if oldShape != settings.dockShape || oldIslandPos != settings.islandPosition {
@@ -1128,7 +1309,11 @@ public final class StageCoordinator: ObservableObject {
     }
 
     public func requestAccessibilityPermission() {
+        let wasTrusted = isAccessibilityTrusted
         isAccessibilityTrusted = AXWindowController.isAccessibilityTrusted(promptIfNeeded: true)
+        if !wasTrusted && isAccessibilityTrusted {
+            onAccessibilityTrustChanged?(true)
+        }
         if !isAccessibilityTrusted,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
@@ -1189,7 +1374,7 @@ public final class StageCoordinator: ObservableObject {
                         onScreenID: onScreenID,
                         wasHidden: wasHidden,
                         generation: gen,
-                        smoothResize: smoothResize
+                        smoothResize: smoothResize && !wasHidden
                     )
                     return
                 } else {
@@ -1202,7 +1387,6 @@ public final class StageCoordinator: ObservableObject {
                                   self.windowAlignGeneration == gen,
                                   self.isAccessibilityTrusted,
                                   self.activeBundleID == item.bundleIdentifier,
-                                  self.layoutMode == .monocleStack,
                                   let win = AXWindowController.primaryWindow(for: pid),
                                   !AXWindowController.isFullScreen(win)
                             else { return }
@@ -1280,7 +1464,7 @@ public final class StageCoordinator: ObservableObject {
             AXWindowController.unminimizeIfNeeded(win)
             AXWindowController.activateApplication(running, window: win, appURL: item.appURL)
             let pid = running.processIdentifier
-            let animDuration = max(0.14, settings.animationSpeed.previewFrameDuration)
+            let animDuration = max(0.14, settings.ringAnimationSpeed.previewFrameDuration)
             frameAnimator.animate(
                 window: win,
                 pid: pid,
@@ -1293,7 +1477,13 @@ public final class StageCoordinator: ObservableObject {
                       self.activeBundleID == item.bundleIdentifier
                 else { return }
                 AXWindowController.raise(win)
-                self.scheduleFrameVerification(pid: pid, targetFrame: frame, generation: generation)
+                self.scheduleFrameVerification(
+                    pid: pid,
+                    window: win,
+                    targetFrame: frame,
+                    generation: generation,
+                    delays: wasHidden ? [0.06, 0.18, 0.38, 0.60] : [0.08, 0.24, 0.45]
+                )
                 if hideOthersAfter {
                     self.scheduleHideOtherStagedApps(except: item.bundleIdentifier, onScreenID: onScreenID)
                 }
@@ -1318,7 +1508,6 @@ public final class StageCoordinator: ObservableObject {
                       self.windowAlignGeneration == generation,
                       self.isAccessibilityTrusted,
                       self.activeBundleID == item.bundleIdentifier,
-                      self.layoutMode == .monocleStack,
                       let currentWin = AXWindowController.primaryWindow(for: pid),
                       !AXWindowController.isFullScreen(currentWin)
                 else { return }
@@ -1341,6 +1530,7 @@ public final class StageCoordinator: ObservableObject {
 
     private func scheduleFrameVerification(
         pid: pid_t,
+        window targetWindow: AXUIElement? = nil,
         targetFrame: CGRect,
         generation: UInt64,
         delays: [TimeInterval] = [0.08, 0.22]
@@ -1351,7 +1541,7 @@ public final class StageCoordinator: ObservableObject {
                 guard let self,
                       self.windowAlignGeneration == generation,
                       self.isAccessibilityTrusted,
-                      let currentWin = AXWindowController.primaryWindow(for: pid),
+                      let currentWin = targetWindow ?? AXWindowController.primaryWindow(for: pid),
                       !AXWindowController.isFullScreen(currentWin)
                 else { return }
                 if let currentF = AXWindowController.frame(of: currentWin) {
@@ -1383,7 +1573,16 @@ public final class StageCoordinator: ObservableObject {
 
     private func hideOtherStagedApps(except keepBundleID: String, onScreenID: String? = nil) {
         let screens = DisplayGeometry.allScreens()
-        let effectiveScreenID = onScreenID ?? resolvedScreen()?.id
+        let targetLiveScreenID: String? = AXWindowController.runningApp(bundleIdentifier: keepBundleID)
+            .flatMap { liveWindowFrameQuartz(for: $0.processIdentifier) }
+            .flatMap { DisplayGeometry.screen(containingQuartzRect: $0, screens: screens)?.id }
+        guard let effectiveScreenID = DisplayGeometry.effectiveHideTargetScreenID(
+            explicitScreenID: onScreenID,
+            targetAppLiveScreenID: targetLiveScreenID,
+            dockScreenID: resolvedScreen()?.id,
+            screenCount: screens.count
+        ) else { return }
+
         for other in apps where other.bundleIdentifier != keepBundleID {
             guard let running = AXWindowController.runningApp(bundleIdentifier: other.bundleIdentifier),
                   !running.isHidden
@@ -1479,7 +1678,11 @@ public final class StageCoordinator: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                 Task { @MainActor in
                     guard let self = self else { return }
+                    let wasTrusted = self.isAccessibilityTrusted
                     self.isAccessibilityTrusted = AXWindowController.isAccessibilityTrusted(promptIfNeeded: false)
+                    if !wasTrusted && self.isAccessibilityTrusted {
+                        self.onAccessibilityTrustChanged?(true)
+                    }
                     self.refreshRuntimeInfo()
                 }
             }
@@ -1548,6 +1751,11 @@ public final class StageCoordinator: ObservableObject {
                 activeBundleID = bid
             }
             onDockZOrderShouldUpdate?(.floatingFront)
+            if settings.showNotificationBadges {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                    self?.refreshRuntimeInfo()
+                }
+            }
             return
         }
 
@@ -1577,14 +1785,22 @@ public final class StageCoordinator: ObservableObject {
         let trustedNow = AXWindowController.isAccessibilityTrusted(promptIfNeeded: false)
         if trustedNow != isAccessibilityTrusted {
             isAccessibilityTrusted = trustedNow
+            if trustedNow {
+                onAccessibilityTrustChanged?(true)
+            }
         }
 
-        let badgeSnapshot: AXWindowController.DockBadgeSnapshot? =
-            (trustedNow && settings.showNotificationBadges)
-            ? AXWindowController.readDockBadges()
-            : nil
+        let badgeSnapshot: AXWindowController.DockBadgeSnapshot?
+        if settings.showNotificationBadges {
+            let axSnapshot = trustedNow ? AXWindowController.readDockBadges() : AXWindowController.DockBadgeSnapshot()
+            badgeSnapshot = cachedLSBadgeSnapshot.merged(with: axSnapshot)
+        } else {
+            cachedLSBadgeSnapshot = AXWindowController.DockBadgeSnapshot()
+            badgeSnapshot = nil
+        }
 
         var next: [String: AppRuntimeInfo] = [:]
+        var runningBundleIDs: [String] = []
         for item in apps {
             let running = AXWindowController.runningApp(bundleIdentifier: item.bundleIdentifier)
             let badge = badgeSnapshot?.badge(
@@ -1595,6 +1811,7 @@ public final class StageCoordinator: ObservableObject {
             )
 
             if let running {
+                runningBundleIDs.append(item.bundleIdentifier)
                 let pid = running.processIdentifier
                 let mem = AppDiscoveryService.memoryUsageMB(for: pid)
                 var title = runtimeInfo[item.bundleIdentifier]?.windowTitle ?? ""
@@ -1617,11 +1834,55 @@ public final class StageCoordinator: ObservableObject {
             }
         }
         runtimeInfo = next
+
+        if settings.showNotificationBadges, !runningBundleIDs.isEmpty {
+            scheduleLaunchServicesBadgeRefresh(forBundleIDs: runningBundleIDs)
+        }
+    }
+
+    private func scheduleLaunchServicesBadgeRefresh(forBundleIDs bundleIDs: [String]) {
+        guard !isFetchingLSBadges else { return }
+        isFetchingLSBadges = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let freshLS = AXWindowController.readLaunchServicesBadges(forBundleIDs: bundleIDs)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isFetchingLSBadges = false
+                guard self.settings.showNotificationBadges else { return }
+                guard freshLS.byBundleID != self.cachedLSBadgeSnapshot.byBundleID else { return }
+                self.cachedLSBadgeSnapshot = freshLS
+                let axSnapshot = self.isAccessibilityTrusted
+                    ? AXWindowController.readDockBadges()
+                    : AXWindowController.DockBadgeSnapshot()
+                let merged = freshLS.merged(with: axSnapshot)
+                var updated = self.runtimeInfo
+                for item in self.apps {
+                    let running = AXWindowController.runningApp(bundleIdentifier: item.bundleIdentifier)
+                    let badge = merged.badge(
+                        forBundleID: item.bundleIdentifier,
+                        appURL: item.appURL,
+                        displayName: item.displayName,
+                        localizedName: running?.localizedName
+                    )
+                    if var info = updated[item.bundleIdentifier] {
+                        info.badgeLabel = badge
+                        updated[item.bundleIdentifier] = info
+                    }
+                }
+                self.runtimeInfo = updated
+            }
+        }
     }
 
     private func loadInitialState() {
         if let saved = persistence.load() {
             self.settings = saved.settings
+            if self.settings.isExpandedIslandVertical {
+                self.settings.islandCustomWidth = 0
+            } else {
+                self.settings.islandCustomHeight = 0
+            }
+            L10n.setLanguage(self.settings.language)
             let filtered = saved.apps.filter {
                 $0.existsOnDisk && !Self.excludedBundleIDs.contains($0.bundleIdentifier)
             }
@@ -1640,6 +1901,7 @@ public final class StageCoordinator: ObservableObject {
             }
         } else {
             // Manual curation: start clean and let user pick the exact apps they want
+            L10n.setLanguage(self.settings.language)
             self.apps = []
             scheduleSave()
         }
@@ -1661,7 +1923,7 @@ public final class StageCoordinator: ObservableObject {
             moveScreenShortcut: settings.effectiveMoveScreenShortcut,
             radialShortcut: settings.activeRadialKeyboardShortcut,
             splitRingShortcut: settings.activeSplitRingShortcut,
-            numberModifier: settings.numberSwitchModifier
+            numberModifiers: settings.effectiveNumberSwitchModifiers
         ) { [weak self] action in
             Task { @MainActor in
                 guard let self = self else { return }

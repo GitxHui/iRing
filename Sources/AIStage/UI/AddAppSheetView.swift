@@ -22,12 +22,13 @@ public struct AddAppSheetView: View {
     }
 
     public var body: some View {
+        let _ = coordinator.settings.language
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("搜索本机已安装应用…", text: $searchText)
+                    TextField(L10n.t("搜索本机已安装应用…", "Search installed apps…"), text: $searchText)
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 10)
@@ -40,7 +41,7 @@ public struct AddAppSheetView: View {
                 Button {
                     pickAppManually()
                 } label: {
-                    Label("浏览…", systemImage: "folder")
+                    Label(L10n.t("浏览…", "Browse…"), systemImage: "folder")
                 }
                 .controlSize(.regular)
             }
@@ -68,12 +69,12 @@ public struct AddAppSheetView: View {
                     Spacer()
 
                     if isAdded {
-                        Button("移除") {
+                        Button(L10n.t("移除", "Remove")) {
                             coordinator.removeApp(bundleID: item.bundleIdentifier)
                         }
                         .controlSize(.small)
                     } else {
-                        Button("添加") {
+                        Button(L10n.t("添加", "Add")) {
                             coordinator.addApp(item)
                         }
                         .buttonStyle(.borderedProminent)
@@ -87,11 +88,14 @@ public struct AddAppSheetView: View {
             Divider()
 
             HStack {
-                Text("已添加 \(coordinator.apps.count) 个应用 · 手动挑选你要叠放或平铺的桌面应用")
+                Text(L10n.t(
+                    "已添加 \(coordinator.apps.count) 个应用 · 挑选你要加入灵动岛与圆环的常用应用",
+                    "\(coordinator.apps.count) apps added · Pick apps for your Dynamic Island and Radial Ring"
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("完成") {
+                Button(L10n.t("完成", "Done")) {
                     onClose()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -105,7 +109,7 @@ public struct AddAppSheetView: View {
 
     private func pickAppManually() {
         let panel = NSOpenPanel()
-        panel.title = "选择要添加到 iRing 的应用"
+        panel.title = L10n.t("选择要添加到 iRing 的应用", "Choose Apps to Add to iRing")
         panel.allowedContentTypes = [.applicationBundle]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false

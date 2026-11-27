@@ -49,7 +49,12 @@ public final class WindowFrameAnimator {
                 "com.hnc.discord",
                 "md.obsidian",
                 "com.openai.chat",
+                "com.openai.codex",
                 "com.anthropic.claudefordesktop",
+                "com.google.antigravity",
+                "com.anysphere.",
+                "dsh-tauri",
+                "com.follow.clash",
                 "notion.id",
                 "com.cursor."
             ]
@@ -180,6 +185,9 @@ public final class WindowFrameAnimator {
         }
         if let axPos = AXValueCreate(.cgPoint, &pt) {
             AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axPos)
+        }
+        if let axSize = AXValueCreate(.cgSize, &sz) {
+            AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
         }
     }
 }

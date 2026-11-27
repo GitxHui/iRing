@@ -161,7 +161,6 @@ public final class LoopRadialState: ObservableObject {
     @Published public var committedIndex: Int? = nil
     @Published public var lockedSplitApp: StageAppItem? = nil
     @Published public var splitSectorIndex: Int? = nil
-    @Published public var splitOuterRingActive: Bool = false
     @Published public var wedgeRotationDegrees: Double = 0
     @Published public var pointerDistance: CGFloat = 0
     @Published public var anchorScreenID: String? = nil
@@ -171,9 +170,11 @@ public final class LoopRadialState: ObservableObject {
     @Published public var previewTargetRectLocal: CGRect = .zero
     @Published public var previewScreenFrameAppKit: CGRect = .zero
     @Published public var splitTargetPID: pid_t? = nil
+    @Published public var splitTargetFrameQuartz: CGRect? = nil
     @Published public var isBlankAreaFillSession: Bool = false
     @Published public var pendingFillFrameQuartz: CGRect? = nil
     @Published public var customWindowScale: CGFloat = 1.0
+    @Published public var isResizeModifierActiveUI: Bool = false
 
     public init() {}
 }
@@ -213,7 +214,7 @@ public final class LoopRadialController {
         case keyboardCombo
         case splitHotkey
         case optionScrollSplit
-        case modifierHold(RadialModifierKey)
+        case modifierHold(key: RadialModifierKey, isSplit: Bool)
     }
 
     private enum TriggerStartKind {
@@ -237,6 +238,11 @@ public final class LoopRadialController {
     private var isKeyboardLatched = false
     private var isResizeModifierHeld = false
     private var isResizeModifierLatched = false
+    private var lastResizePointerAppKit: CGPoint?
+    private var lastWheelResizeUptime: TimeInterval = 0
+    private var splitDoubleTapArmedKeyCode: UInt16? = nil
+    private var lastSplitTapKeyCode: UInt16 = 0
+    private var lastSplitTapUpUptime: TimeInterval = 0
     private var keyboardPressUptime: TimeInterval = 0
     private var activeButtonNumber: Int = -1
     private var downMouseAppKit: CGPoint = .zero
@@ -387,10 +393,7 @@ public final class LoopRadialController {
 
                 case .scrollWheel:
                     let nsFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
-                    let precise = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
-                    let delta: CGFloat = precise
-                        ? CGFloat(event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1))
-                        : CGFloat(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
+                    let (delta, precise) = LoopRadialController.extractScrollDelta(from: event)
                     if controller.tapSessionActive() {
                         DispatchQueue.main.async {
                             controller.handleScroll(delta: delta, precise: precise, flags: nsFlags)
@@ -411,6 +414,9 @@ public final class LoopRadialController {
                             return Unmanaged.passUnretained(event)
                         }
                         DispatchQueue.main.async { controller.handleKey(code) }
+                        return nil
+                    } else if controller.tapShouldPromotePendingHoldWithTab(keyCode: code) {
+                        DispatchQueue.main.async { controller.promotePendingModifierHoldToSplitRing() }
                         return nil
                     } else if controller.tapCancelPendingModifierHoldIfNeeded() {
                         return Unmanaged.passUnretained(event)
@@ -465,14 +471,7 @@ public final class LoopRadialController {
     }
 
     private nonisolated func tapShouldStartOptionScrollSplit(flags: NSEvent.ModifierFlags) -> Bool {
-        MainActor.assumeIsolated {
-            triggerSource == .none
-                && !state.isVisible
-                && coordinator.settings.splitMouseTrigger == .optionScroll
-                && flags.contains(.option)
-                && !flags.contains(.command)
-                && !flags.contains(.control)
-        }
+        false
     }
 
     private nonisolated func tapShouldCaptureOtherMouse(buttonNumber: Int) -> Bool {
@@ -488,8 +487,28 @@ public final class LoopRadialController {
         }
     }
 
+    private nonisolated func tapShouldPromotePendingHoldWithTab(keyCode: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard keyCode == 48, !state.isVisible else { return false }
+            // Only promote App Ring holds (e.g. Left ⌥ + Tab -> Split Ring); pass through ⌃ + Tab to apps/browsers.
+            if case .modifierHold(_, false) = triggerSource { return true }
+            return false
+        }
+    }
+
+    private func promotePendingModifierHoldToSplitRing() {
+        guard !state.isVisible, case .modifierHold = triggerSource else { return }
+        holdTimer?.cancel()
+        holdTimer = nil
+        configureSplitCursorHitTest()
+        revealRing(centeredNear: downMouseAppKit)
+        updatePreview()
+    }
+
     private nonisolated func tapCancelPendingModifierHoldIfNeeded() -> Bool {
         MainActor.assumeIsolated {
+            splitDoubleTapArmedKeyCode = nil
+            lastSplitTapUpUptime = 0
             if case .modifierHold = triggerSource, !state.isVisible {
                 endTriggerSession(commit: false)
                 return true
@@ -511,13 +530,44 @@ public final class LoopRadialController {
         return mask
     }
 
+    private static func extractScrollDelta(from event: CGEvent) -> (delta: CGFloat, precise: Bool) {
+        let precise = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        let rawDelta: CGFloat
+        if precise {
+            // PointDelta fields in CoreGraphics are integers, not doubles; fixed-pt serves as fallback.
+            var d1 = CGFloat(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
+            if d1 == 0 {
+                d1 = CGFloat(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1))
+            }
+            var d2 = CGFloat(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
+            if d2 == 0 {
+                d2 = CGFloat(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2))
+            }
+            rawDelta = abs(d1) >= abs(d2) ? d1 : d2
+        } else {
+            var d1 = CGFloat(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
+            if d1 == 0 {
+                d1 = CGFloat(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1))
+            }
+            var d2 = CGFloat(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
+            if d2 == 0 {
+                d2 = CGFloat(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2))
+            }
+            rawDelta = abs(d1) >= abs(d2) ? d1 : d2
+        }
+        let inverted = NSEvent(cgEvent: event)?.isDirectionInvertedFromDevice ?? false
+        return (inverted ? -rawDelta : rawDelta, precise)
+    }
+
     private func isResizeModifierActive(flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) -> Bool {
-        state.pendingFillFrameQuartz == nil && coordinator.settings.ringResizeModifier.matches(flags)
+        false
     }
 
     private func latchForResizeModifier() {
         isResizeModifierLatched = true
         isResizeModifierHeld = true
+        state.isResizeModifierActiveUI = true
+        lastResizePointerAppKit = lastPointerAppKit ?? NSEvent.mouseLocation
         isHoldingTrigger = false
         isKeyboardLatched = true
         scrollAccumulator = 0
@@ -634,20 +684,32 @@ public final class LoopRadialController {
 
         case .keyDown:
             guard cgEventTap == nil else { return }
+            let code = Int(event.keyCode)
+            if state.isVisible && (isHoldingTrigger || isKeyboardLatched) {
+                handleKey(code)
+                return
+            }
+            if code == 48, !state.isVisible, case .modifierHold(_, false) = triggerSource {
+                promotePendingModifierHoldToSplitRing()
+                return
+            }
+            splitDoubleTapArmedKeyCode = nil
+            lastSplitTapUpUptime = 0
             if case .modifierHold = triggerSource, !state.isVisible {
                 endTriggerSession(commit: false)
                 return
             }
-            if state.isVisible && (isHoldingTrigger || isKeyboardLatched) {
-                handleKey(Int(event.keyCode))
-            }
 
         case .scrollWheel:
             guard cgEventTap == nil else { return }
+            let rawDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+                ? event.scrollingDeltaY
+                : event.scrollingDeltaX
+            let delta = event.isDirectionInvertedFromDevice ? -rawDelta : rawDelta
             if (isHoldingTrigger || isKeyboardLatched), state.isVisible {
-                handleScroll(delta: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas, flags: event.modifierFlags)
+                handleScroll(delta: delta, precise: event.hasPreciseScrollingDeltas, flags: event.modifierFlags)
             } else if tapShouldStartOptionScrollSplit(flags: event.modifierFlags) {
-                beginOptionScrollSplitSession(delta: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas)
+                beginOptionScrollSplitSession(delta: delta, precise: event.hasPreciseScrollingDeltas)
             }
 
         default:
@@ -661,6 +723,7 @@ public final class LoopRadialController {
         scrollAccumulator = 0
         isResizeModifierHeld = false
         isResizeModifierLatched = false
+        lastResizePointerAppKit = nil
         if coordinator.settings.showNotificationBadges {
             coordinator.refreshRuntimeInfo()
         }
@@ -677,11 +740,12 @@ public final class LoopRadialController {
         state.committedIndex = nil
         state.lockedSplitApp = nil
         state.splitSectorIndex = nil
-        state.splitOuterRingActive = false
         state.splitTargetPID = nil
+        state.splitTargetFrameQuartz = nil
         state.isBlankAreaFillSession = false
         state.pendingFillFrameQuartz = nil
         state.customWindowScale = 1.0
+        state.isResizeModifierActiveUI = false
         state.pointerDistance = 0
         state.layoutTarget = .stage
     }
@@ -691,6 +755,7 @@ public final class LoopRadialController {
         let mouseQuartz = CGPoint(x: downMouseAppKit.x, y: primaryH - downMouseAppKit.y)
         if let hit = AXWindowController.windowOwnerAtQuartzPoint(mouseQuartz) {
             state.splitTargetPID = hit.pid
+            state.splitTargetFrameQuartz = hit.frameQuartz
             state.isBlankAreaFillSession = false
             let matched = hit.bundleID.flatMap { bid in
                 coordinator.apps.first(where: { $0.bundleIdentifier == bid })
@@ -698,6 +763,7 @@ public final class LoopRadialController {
             enterSplitRingMode(targetApp: matched)
         } else {
             state.splitTargetPID = nil
+            state.splitTargetFrameQuartz = nil
             state.isBlankAreaFillSession = true
             enterSplitRingMode(targetApp: nil)
         }
@@ -745,6 +811,7 @@ public final class LoopRadialController {
     }
 
     private func handleKeyboardComboPressed() {
+        refreshEventTapIfTrusted()
         if state.isVisible && isKeyboardLatched {
             endTriggerSession(commit: state.selectedIndex != nil)
             return
@@ -761,6 +828,10 @@ public final class LoopRadialController {
 
     private func handleKeyboardComboReleased() {
         guard triggerSource == .keyboardCombo else { return }
+        if state.isVisible && (isResizeModifierHeld || isResizeModifierActive()) {
+            latchForResizeModifier()
+            return
+        }
         let held = ProcessInfo.processInfo.systemUptime - keyboardPressUptime
         if state.selectedIndex != nil || held >= 0.25 {
             endTriggerSession(commit: true)
@@ -773,6 +844,7 @@ public final class LoopRadialController {
     }
 
     private func handleSplitHotkeyPressed() {
+        refreshEventTapIfTrusted()
         if state.isVisible && isKeyboardLatched && state.mode == .splitLayout {
             endTriggerSession(commit: true)
             return
@@ -791,6 +863,10 @@ public final class LoopRadialController {
 
     private func handleSplitHotkeyReleased() {
         guard triggerSource == .splitHotkey else { return }
+        if state.isVisible && (isResizeModifierHeld || isResizeModifierActive()) {
+            latchForResizeModifier()
+            return
+        }
         let held = ProcessInfo.processInfo.systemUptime - keyboardPressUptime
         if state.splitSectorIndex != nil || held >= 0.25 {
             endTriggerSession(commit: true)
@@ -818,14 +894,13 @@ public final class LoopRadialController {
     }
 
     private func enterSplitRingMode(targetApp: StageAppItem?) {
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         let anim: Animation? = speed.isInstant ? nil : .spring(response: max(0.16, speed.ringSpringResponse), dampingFraction: 0.78)
         withAnimation(anim) {
             state.mode = .splitLayout
             state.lockedSplitApp = targetApp
             state.selectedIndex = nil
             state.splitSectorIndex = nil
-            state.splitOuterRingActive = false
             state.layoutTarget = .maximize
         }
         updateSplitSelection(for: lastPointerAppKit ?? NSEvent.mouseLocation)
@@ -840,14 +915,13 @@ public final class LoopRadialController {
             } ?? frontmostStagedAppItem()
             enterSplitRingMode(targetApp: pickedItem)
         } else {
-            let speed = coordinator.settings.animationSpeed
+            let speed = coordinator.settings.ringAnimationSpeed
             let anim: Animation? = speed.isInstant ? nil : .spring(response: max(0.16, speed.ringSpringResponse), dampingFraction: 0.78)
             withAnimation(anim) {
                 state.mode = .appSwitcher
                 state.lockedSplitApp = nil
                 state.splitSectorIndex = nil
-                state.splitOuterRingActive = false
-                state.layoutTarget = .stage
+                    state.layoutTarget = .stage
             }
             handlePointerMoved(quartzLocation: nil)
         }
@@ -856,6 +930,10 @@ public final class LoopRadialController {
     private func matchesModifierHoldStart(_ modKey: RadialModifierKey, flags: NSEvent.ModifierFlags, keyCode: UInt16) -> Bool {
         let standard = flags.intersection([.control, .option, .shift, .command])
         switch modKey {
+        case .leftOption:
+            return keyCode == 58 && standard == .option
+        case .leftControl:
+            return keyCode == 59 && standard == .control
         case .rightOption:
             return keyCode == 61 && standard == .option
         case .rightCommand:
@@ -869,8 +947,10 @@ public final class LoopRadialController {
 
     private func isModifierHoldStillActive(_ modKey: RadialModifierKey, flags: NSEvent.ModifierFlags) -> Bool {
         switch modKey {
-        case .rightOption:
+        case .leftOption, .rightOption:
             return flags.contains(.option)
+        case .leftControl:
+            return flags.contains(.control)
         case .rightCommand:
             return flags.contains(.command)
         case .fnKey:
@@ -881,8 +961,18 @@ public final class LoopRadialController {
     }
 
     private func handleModifierFlagsChanged(flags: NSEvent.ModifierFlags, keyCode: UInt16) {
+        let wasResizeHeld = isResizeModifierHeld
         let resizeActive = isResizeModifierActive(flags: flags)
         isResizeModifierHeld = state.isVisible && resizeActive
+        state.isResizeModifierActiveUI = state.isVisible && resizeActive
+        if state.isVisible && resizeActive && !wasResizeHeld {
+            lastResizePointerAppKit = lastPointerAppKit ?? NSEvent.mouseLocation
+        } else if !resizeActive {
+            lastResizePointerAppKit = nil
+        }
+        if state.isVisible && resizeActive != wasResizeHeld {
+            updatePreview()
+        }
 
         if isResizeModifierLatched {
             if !resizeActive {
@@ -902,7 +992,7 @@ public final class LoopRadialController {
             return
         }
 
-        if case .modifierHold(let activeMod) = triggerSource {
+        if case .modifierHold(let activeMod, _) = triggerSource {
             if !isModifierHoldStillActive(activeMod, flags: flags) {
                 if state.isVisible && resizeActive {
                     latchForResizeModifier()
@@ -913,11 +1003,68 @@ public final class LoopRadialController {
             return
         }
 
-        guard coordinator.settings.radialKeyboardMode == .modifierHold, triggerSource == .none else { return }
+        if let armedCode = splitDoubleTapArmedKeyCode {
+            let splitKey = coordinator.settings.splitModifierKey
+            if !isModifierHoldStillActive(splitKey, flags: flags) {
+                lastSplitTapKeyCode = armedCode
+                lastSplitTapUpUptime = ProcessInfo.processInfo.systemUptime
+                splitDoubleTapArmedKeyCode = nil
+            }
+        }
+
+        guard triggerSource == .none else { return }
+
+        let splitKey = coordinator.settings.splitModifierKey
+        let splitHoldEnabled = coordinator.settings.splitKeyboardMode == .modifierHold
+        let appHoldEnabled = coordinator.settings.radialKeyboardMode == .modifierHold
+        let splitCollidesWithApp = appHoldEnabled && StageSettings.modifierKeysConflict(coordinator.settings.radialModifierKey, splitKey)
+
+        if splitHoldEnabled && !splitCollidesWithApp && matchesModifierHoldStart(splitKey, flags: flags, keyCode: keyCode) {
+            if coordinator.settings.splitModifierDoubleTap {
+                let now = ProcessInfo.processInfo.systemUptime
+                if lastSplitTapKeyCode == keyCode && (now - lastSplitTapUpUptime) <= 0.38 {
+                    lastSplitTapUpUptime = 0
+                    splitDoubleTapArmedKeyCode = nil
+                    refreshEventTapIfTrusted()
+                    triggerSource = .modifierHold(key: splitKey, isSplit: true)
+                    isHoldingTrigger = true
+                    isKeyboardLatched = false
+                    activeButtonNumber = -1
+                    prepareTriggerSnapshot()
+                    configureSplitCursorHitTest()
+                    revealRing(centeredNear: downMouseAppKit)
+                    updatePreview()
+                    return
+                } else {
+                    splitDoubleTapArmedKeyCode = keyCode
+                    return
+                }
+            }
+
+            refreshEventTapIfTrusted()
+            triggerSource = .modifierHold(key: splitKey, isSplit: true)
+            isHoldingTrigger = true
+            isKeyboardLatched = false
+            activeButtonNumber = -1
+            prepareTriggerSnapshot()
+
+            let timer = DispatchWorkItem { [weak self] in
+                guard let self, self.isHoldingTrigger, !self.state.isVisible else { return }
+                self.configureSplitCursorHitTest()
+                self.revealRing(centeredNear: self.downMouseAppKit)
+                self.updatePreview()
+            }
+            holdTimer = timer
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: timer)
+            return
+        }
+
+        guard appHoldEnabled else { return }
         let modKey = coordinator.settings.radialModifierKey
         guard matchesModifierHoldStart(modKey, flags: flags, keyCode: keyCode) else { return }
 
-        triggerSource = .modifierHold(modKey)
+        refreshEventTapIfTrusted()
+        triggerSource = .modifierHold(key: modKey, isSplit: false)
         isHoldingTrigger = true
         isKeyboardLatched = false
         activeButtonNumber = -1
@@ -928,7 +1075,7 @@ public final class LoopRadialController {
             self.revealRing(centeredNear: self.downMouseAppKit)
         }
         holdTimer = timer
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: timer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24, execute: timer)
     }
 
     private func performHaptic(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {
@@ -954,7 +1101,7 @@ public final class LoopRadialController {
         }
         ringPanel.alphaValue = 1
         ringPanel.orderFrontRegardless()
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         let style = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             ? AppearAnimationStyle.flash
             : coordinator.settings.appearAnimationStyle
@@ -969,6 +1116,10 @@ public final class LoopRadialController {
                 state.isVisible = true
             }
         }
+        let resizeActive = isResizeModifierActive()
+        isResizeModifierHeld = resizeActive
+        state.isResizeModifierActiveUI = resizeActive
+        lastResizePointerAppKit = resizeActive ? (lastPointerAppKit ?? NSEvent.mouseLocation) : nil
         performHaptic(.generic)
     }
 
@@ -989,14 +1140,42 @@ public final class LoopRadialController {
 
         let current = quartzLocation.map(appKitPoint(fromQuartz:)) ?? NSEvent.mouseLocation
         lastPointerAppKit = current
-        if state.isVisible && (isResizeModifierLatched || isResizeModifierHeld || isResizeModifierActive()) {
+        if state.isVisible
+            && (state.mode == .splitLayout || state.selectedIndex != nil)
+            && (isResizeModifierLatched || isResizeModifierHeld || isResizeModifierActive()) {
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastWheelResizeUptime >= 0.25 {
+                if let prev = lastResizePointerAppKit {
+                    let dy = current.y - prev.y
+                    if abs(dy) >= 0.5 {
+                        let nextScale = DisplayGeometry.adjustedWindowScale(
+                            current: state.customWindowScale,
+                            pointerDeltaY: dy
+                        )
+                        if abs(nextScale - state.customWindowScale) > 0.002 {
+                            if Int(round(nextScale * 20)) != Int(round(state.customWindowScale * 20)) {
+                                performHaptic(.alignment)
+                            }
+                            state.customWindowScale = nextScale
+                            updatePreview()
+                        }
+                    }
+                }
+                lastResizePointerAppKit = current
+            }
             return
         }
         if !state.isVisible {
             let moved = hypot(current.x - downMouseAppKit.x, current.y - downMouseAppKit.y)
             guard moved >= 8.0 else { return }
             holdTimer?.cancel()
-            revealRing(centeredNear: downMouseAppKit)
+            if case .modifierHold(_, true) = triggerSource {
+                configureSplitCursorHitTest()
+                revealRing(centeredNear: downMouseAppKit)
+                updatePreview()
+            } else {
+                revealRing(centeredNear: downMouseAppKit)
+            }
         }
 
         if state.mode == .splitLayout {
@@ -1014,7 +1193,7 @@ public final class LoopRadialController {
         state.pointerDistance = result.distance
 
         guard state.selectedIndex != result.index else { return }
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         let springResp = max(0.14, speed.ringSpringResponse * 0.85)
         if let idx = result.index {
             let nextDeg = Self.shortestTargetDegrees(from: state.wedgeRotationDegrees, toIndex: idx, count: count)
@@ -1038,22 +1217,19 @@ public final class LoopRadialController {
     }
 
     private func updateSplitSelection(for currentAppKit: CGPoint) {
-        let outerRadius = max(136, CGFloat(coordinator.settings.radialRingDiameter) * 0.48)
         let res = DisplayGeometry.loopSplitTarget(
             from: ringCenterAppKit,
             to: currentAppKit,
             deadzoneRadius: deadzoneRadius,
-            outerThirdRadius: outerRadius,
             centerDefault: .maximize
         )
         state.pointerDistance = hypot(currentAppKit.x - ringCenterAppKit.x, currentAppKit.y - ringCenterAppKit.y)
         let changedSector = state.splitSectorIndex != res.sectorIndex
-        let changedOuter = state.splitOuterRingActive != res.isOuterRing
         let changedTarget = state.layoutTarget != res.target
 
-        guard changedSector || changedOuter || changedTarget else { return }
+        guard changedSector || changedTarget else { return }
 
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         let springResp = max(0.14, speed.ringSpringResponse * 0.82)
         if let sector = res.sectorIndex {
             let nextDeg = Self.shortestTargetDegrees(from: state.wedgeRotationDegrees, toIndex: sector, count: 8)
@@ -1067,17 +1243,15 @@ public final class LoopRadialController {
         }
         if speed.isInstant {
             state.splitSectorIndex = res.sectorIndex
-            state.splitOuterRingActive = res.isOuterRing
             state.layoutTarget = res.target
         } else {
             withAnimation(.interactiveSpring(response: springResp, dampingFraction: 0.78)) {
                 state.splitSectorIndex = res.sectorIndex
-                state.splitOuterRingActive = res.isOuterRing
                 state.layoutTarget = res.target
             }
         }
-        if changedSector || changedOuter {
-            performHaptic(changedOuter ? .levelChange : .alignment)
+        if changedSector {
+            performHaptic(.alignment)
         }
         updatePreview()
     }
@@ -1092,49 +1266,73 @@ public final class LoopRadialController {
     }
 
     func handleScroll(delta: CGFloat, precise: Bool, flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
-        guard (isHoldingTrigger || isKeyboardLatched), state.isVisible else { return }
+        guard (isHoldingTrigger || isKeyboardLatched),
+              state.isVisible,
+              state.pendingFillFrameQuartz == nil,
+              coordinator.settings.ringScrollResizeEnabled
+        else { return }
 
-        // Ring + Resize Modifier (default ⌘) + Scroll smoothly resizes the window preview box
-        if state.pendingFillFrameQuartz == nil && coordinator.settings.ringResizeModifier.matches(flags) {
-            scrollAccumulator += delta
-            let threshold: CGFloat = precise ? 10 : 0.45
-            guard abs(scrollAccumulator) >= threshold else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            guard now - lastScrollStepUptime >= 0.045 else { return }
-            lastScrollStepUptime = now
-            let stepDelta: CGFloat = scrollAccumulator > 0 ? 0.05 : -0.05
-            scrollAccumulator = 0
-            let nextScale = min(1.0, max(0.45, state.customWindowScale + stepDelta))
-            if abs(nextScale - state.customWindowScale) > 0.005 {
+        if state.mode == .appSwitcher && state.selectedIndex == nil {
+            let apps = state.sessionApps.isEmpty ? coordinator.radialDisplayedApps : state.sessionApps
+            if let idx = DisplayGeometry.radialSelectedIndex(
+                from: ringCenterAppKit,
+                to: lastPointerAppKit ?? NSEvent.mouseLocation,
+                itemCount: apps.count,
+                deadzoneRadius: deadzoneRadius
+            ).index {
+                state.selectedIndex = idx
+            } else {
+                return
+            }
+        }
+
+        lastWheelResizeUptime = ProcessInfo.processInfo.systemUptime
+        if precise {
+            guard abs(delta) > 0.1 else { return }
+            let nextScale = DisplayGeometry.adjustedWindowScale(
+                current: state.customWindowScale,
+                scrollDelta: delta,
+                precise: true
+            )
+            if abs(nextScale - state.customWindowScale) > 0.002 {
+                if Int(round(nextScale * 20)) != Int(round(state.customWindowScale * 20)) {
+                    performHaptic(.alignment)
+                }
                 state.customWindowScale = nextScale
-                performHaptic(.alignment)
                 updatePreview()
             }
             return
         }
 
         scrollAccumulator += delta
-        let threshold: CGFloat = precise ? 14 : 0.9
+        let threshold: CGFloat = 0.45
         guard abs(scrollAccumulator) >= threshold else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastScrollStepUptime >= 0.14 else {
-            scrollAccumulator = 0
-            return
-        }
+        guard now - lastScrollStepUptime >= 0.045 else { return }
         lastScrollStepUptime = now
-        let step = scrollAccumulator < 0 ? 1 : -1
+        let stepInput = scrollAccumulator
         scrollAccumulator = 0
-        if state.mode == .splitLayout {
-            setLayout(state.layoutTarget.cycledVariant(step: step))
-        } else {
-            setLayout(state.layoutTarget.advanced(by: step))
+        let nextScale = DisplayGeometry.adjustedWindowScale(
+            current: state.customWindowScale,
+            scrollDelta: stepInput,
+            precise: false
+        )
+        if abs(nextScale - state.customWindowScale) > 0.005 {
+            state.customWindowScale = nextScale
+            performHaptic(.alignment)
+            updatePreview()
         }
     }
 
     func handleKey(_ keyCode: Int) {
         switch keyCode {
         case 48:
-            toggleSplitRingMode()
+            if state.mode == .appSwitcher && state.selectedIndex == nil {
+                configureSplitCursorHitTest()
+                updatePreview()
+            } else {
+                toggleSplitRingMode()
+            }
         case 53:
             endTriggerSession(commit: false)
         case 36:
@@ -1176,13 +1374,12 @@ public final class LoopRadialController {
             state.wedgeRotationDegrees = Self.shortestTargetDegrees(from: state.wedgeRotationDegrees, toIndex: sector, count: 8)
         }
         state.splitSectorIndex = sector
-        state.splitOuterRingActive = false
         setLayout(layout)
     }
 
     private func setLayout(_ target: RadialLayoutTarget) {
         guard target != state.layoutTarget else { return }
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         if speed.isInstant {
             state.layoutTarget = target
         } else {
@@ -1194,9 +1391,53 @@ public final class LoopRadialController {
         updatePreview()
     }
 
+    private var isPreservingAppSwitchPreview: Bool {
+        state.mode == .appSwitcher
+            && state.layoutTarget == .stage
+            && state.pendingFillFrameQuartz == nil
+            && state.customWindowScale >= 0.999
+            && !isResizeModifierHeld
+            && !isResizeModifierLatched
+    }
+
     private func resolvedPreviewFrameQuartz() -> CGRect? {
         if let pinned = state.pendingFillFrameQuartz {
             return pinned
+        }
+        if isPreservingAppSwitchPreview {
+            let apps = state.sessionApps.isEmpty ? coordinator.radialDisplayedApps : state.sessionApps
+            if let idx = state.selectedIndex, idx >= 0, idx < apps.count {
+                let targetBID = apps[idx].bundleIdentifier
+                if let running = AXWindowController.runningApp(bundleIdentifier: targetBID) {
+                    let win = coordinator.isAccessibilityTrusted
+                        ? AXWindowController.primaryWindow(for: running.processIdentifier)
+                        : nil
+                    let existingFrame = win.flatMap { AXWindowController.frame(of: $0) }
+                        ?? AXWindowController.onScreenWindowFramesQuartz(for: running.processIdentifier).first
+                    if let existingFrame, !existingFrame.isEmpty {
+                        let screens = DisplayGeometry.allScreens()
+                        let winScreenID = DisplayGeometry.screen(containingQuartzRect: existingFrame, screens: screens)?.id
+                        let dockScreen = (state.anchorScreenID.flatMap { id in screens.first(where: { $0.id == id }) })
+                            ?? coordinator.resolvedScreen()
+                        switch DisplayGeometry.resolveWindowSwitchAction(
+                            autoFitWindowOnSwitch: coordinator.settings.autoFitWindowOnSwitch,
+                            pullCrossScreenAppsToIsland: coordinator.settings.pullCrossScreenAppsToIsland,
+                            existingFrameQuartz: existingFrame,
+                            windowScreenID: winScreenID,
+                            dockScreen: dockScreen,
+                            hasExplicitOverrideFrame: false,
+                            forceAlignToDockScreen: false
+                        ) {
+                        case .preserveExisting:
+                            return existingFrame
+                        case .moveToScreenPreservingSize(let movedFrame):
+                            return movedFrame
+                        case .fitToStage:
+                            break
+                        }
+                    }
+                }
+            }
         }
         guard let baseFrame = coordinator.radialTargetFrameQuartz(screenID: state.anchorScreenID, layout: state.layoutTarget) else {
             return nil
@@ -1231,9 +1472,16 @@ public final class LoopRadialController {
         }
 
         let screens = DisplayGeometry.allScreens()
-        let screenInfo = (state.anchorScreenID.flatMap { id in screens.first(where: { $0.id == id }) })
-            ?? DisplayGeometry.screen(containingQuartzRect: frameQ, screens: screens)
-            ?? screens.first
+        let screenInfo: DisplayGeometry.ScreenInfo?
+        if isPreservingAppSwitchPreview {
+            screenInfo = DisplayGeometry.screen(containingQuartzRect: frameQ, screens: screens)
+                ?? (state.anchorScreenID.flatMap { id in screens.first(where: { $0.id == id }) })
+                ?? screens.first
+        } else {
+            screenInfo = (state.anchorScreenID.flatMap { id in screens.first(where: { $0.id == id }) })
+                ?? DisplayGeometry.screen(containingQuartzRect: frameQ, screens: screens)
+                ?? screens.first
+        }
         guard let screenInfo else {
             hidePreview()
             return
@@ -1250,7 +1498,7 @@ public final class LoopRadialController {
             width: max(40, targetAppKit.width),
             height: max(40, targetAppKit.height)
         )
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
 
         let needsPanelSetup = !state.previewVisible || !previewPanel.isVisible || state.previewScreenFrameAppKit != screenAppKit
         if needsPanelSetup {
@@ -1286,7 +1534,7 @@ public final class LoopRadialController {
 
     private func hidePreview() {
         guard state.previewVisible || previewPanel.isVisible else { return }
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         if speed.isInstant {
             state.previewVisible = false
             previewPanel.alphaValue = 0
@@ -1314,6 +1562,7 @@ public final class LoopRadialController {
         let currentMode = state.mode
         let lockedApp = state.lockedSplitApp
         let targetPID = state.splitTargetPID
+        let targetWindowFrame = state.splitTargetFrameQuartz
         let isBlankFill = state.isBlankAreaFillSession
         let pinnedFillFrame = state.pendingFillFrameQuartz
         let ordered = state.sessionApps.isEmpty ? coordinator.radialDisplayedApps : state.sessionApps
@@ -1330,7 +1579,18 @@ public final class LoopRadialController {
         let screenID = state.anchorScreenID
         let savedRingCenter = ringCenterAppKit
         let savedCustomScale = state.customWindowScale
-        let resolvedFrame = resolvedPreviewFrameQuartz()
+        let savedPendingFill = pinnedFillFrame
+        let passOverrideFrameForApp = DisplayGeometry.shouldPassOverrideFrameOnAppCommit(
+            layout: layout,
+            pinnedFillFrame: savedPendingFill,
+            customWindowScale: savedCustomScale
+        )
+        let resolvedFrame: CGRect?
+        if currentMode == .appSwitcher && !passOverrideFrameForApp {
+            resolvedFrame = nil
+        } else {
+            resolvedFrame = resolvedPreviewFrameQuartz()
+        }
 
         // Step 1 -> Step 2 transition: if Split Ring was summoned over blank desktop,
         // release pins the split preview rect and opens App Ring to let the user choose which app fills it.
@@ -1340,16 +1600,18 @@ public final class LoopRadialController {
             isKeyboardLatched = true
             isResizeModifierHeld = false
             isResizeModifierLatched = false
+            lastResizePointerAppKit = nil
+            state.isResizeModifierActiveUI = false
             activeButtonNumber = -1
             scrollAccumulator = 0
             state.pendingFillFrameQuartz = fillFrame
             state.isBlankAreaFillSession = false
             state.splitTargetPID = nil
+            state.splitTargetFrameQuartz = nil
             state.lockedSplitApp = nil
             state.splitSectorIndex = nil
-            state.splitOuterRingActive = false
             state.selectedIndex = nil
-            let speed = coordinator.settings.animationSpeed
+            let speed = coordinator.settings.ringAnimationSpeed
             let anim: Animation? = speed.isInstant ? nil : .spring(response: max(0.16, speed.ringSpringResponse), dampingFraction: 0.78)
             withAnimation(anim) {
                 state.mode = .appSwitcher
@@ -1365,6 +1627,8 @@ public final class LoopRadialController {
         isKeyboardLatched = false
         isResizeModifierHeld = false
         isResizeModifierLatched = false
+        lastResizePointerAppKit = nil
+        state.isResizeModifierActiveUI = false
         activeButtonNumber = -1
         scrollAccumulator = 0
 
@@ -1373,9 +1637,11 @@ public final class LoopRadialController {
             state.splitSectorIndex = nil
             state.lockedSplitApp = nil
             state.splitTargetPID = nil
+            state.splitTargetFrameQuartz = nil
             state.isBlankAreaFillSession = false
             state.pendingFillFrameQuartz = nil
             state.customWindowScale = 1.0
+            state.isResizeModifierActiveUI = false
             state.mode = .appSwitcher
             state.sessionApps = []
             return
@@ -1383,9 +1649,9 @@ public final class LoopRadialController {
 
         let isCommitApp = (currentMode == .appSwitcher && commit && picked != nil)
         let isCommitSplit = (currentMode == .splitLayout && commit)
-        let frame = (isCommitApp || isCommitSplit) ? (pinnedFillFrame ?? resolvedFrame) : nil
+        let frame = (isCommitSplit || (isCommitApp && passOverrideFrameForApp)) ? (pinnedFillFrame ?? resolvedFrame) : nil
 
-        let speed = coordinator.settings.animationSpeed
+        let speed = coordinator.settings.ringAnimationSpeed
         let didCommitApp = isCommitApp && picked.map { $0 >= 0 && $0 < ordered.count } == true
         let didCommit = didCommitApp || isCommitSplit
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -1396,9 +1662,11 @@ public final class LoopRadialController {
             state.splitSectorIndex = nil
             state.lockedSplitApp = nil
             state.splitTargetPID = nil
+            state.splitTargetFrameQuartz = nil
             state.isBlankAreaFillSession = false
             state.pendingFillFrameQuartz = nil
             state.customWindowScale = 1.0
+            state.isResizeModifierActiveUI = false
             state.mode = .appSwitcher
             state.sessionApps = []
             ringPanel.alphaValue = 0
@@ -1426,6 +1694,7 @@ public final class LoopRadialController {
                     self.state.isBlankAreaFillSession = false
                     self.state.pendingFillFrameQuartz = nil
                     self.state.customWindowScale = 1.0
+                    self.state.isResizeModifierActiveUI = false
                     self.state.mode = .appSwitcher
                     self.state.sessionApps = []
                 }
@@ -1435,6 +1704,11 @@ public final class LoopRadialController {
         }
         hidePreview()
 
+        if wasVisible && commit && currentMode == .appSwitcher && ordered.isEmpty {
+            coordinator.onOpenAddAppRequested?()
+            return
+        }
+
         if didCommitApp, let idx = picked {
             let metrics = LoopArtworkMetrics(settings: coordinator.settings, count: ordered.count)
             let angle = -Double.pi / 2.0 + 2.0 * Double.pi * Double(idx) / Double(max(1, ordered.count))
@@ -1442,12 +1716,11 @@ public final class LoopRadialController {
             let cx = savedRingCenter.x + CGFloat(cos(angle)) * metrics.orbit
             let cy = savedRingCenter.y - CGFloat(sin(angle)) * metrics.orbit
             let sourceRect = CGRect(x: cx - iconSide * 0.5, y: cy - iconSide * 0.5, width: iconSide, height: iconSide)
-            let treatAsSplit = layout.isSplitLayout || pinnedFillFrame != nil || savedCustomScale < 0.999
             coordinator.switchToApp(
                 bundleID: ordered[idx].bundleIdentifier,
                 overrideFrameQuartz: frame,
                 sourceIconRectAppKit: sourceRect,
-                isSplitLayout: treatAsSplit
+                isSplitLayout: passOverrideFrameForApp
             )
         } else if isCommitSplit, let targetFrame = frame {
             let frontBundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -1467,7 +1740,12 @@ public final class LoopRadialController {
                     isSplitLayout: layout.isSplitLayout || savedCustomScale < 0.999
                 )
             } else if let targetPID {
-                coordinator.applyFrameToWindow(pid: targetPID, frameQuartz: targetFrame, screenID: screenID)
+                coordinator.applyFrameToWindow(
+                    pid: targetPID,
+                    frameQuartz: targetFrame,
+                    screenID: screenID,
+                    preferredWindowFrameQuartz: targetWindowFrame
+                )
             } else {
                 coordinator.applySplitLayoutToFrontmostWindow(layout: layout, screenID: screenID, overrideFrameQuartz: targetFrame)
             }
@@ -1512,7 +1790,6 @@ private struct LoopRadialRingView: View {
             mode: state.mode,
             layoutTarget: state.layoutTarget,
             splitSectorIndex: state.splitSectorIndex,
-            splitOuterRingActive: state.splitOuterRingActive,
             lockedSplitAppItem: lockedRenderItem
         )
     }
@@ -1552,7 +1829,6 @@ public struct LoopRadialArtwork: View {
     public let mode: LoopRadialMode
     public let layoutTarget: RadialLayoutTarget
     public let splitSectorIndex: Int?
-    public let splitOuterRingActive: Bool
     public let lockedSplitAppItem: LoopRadialRenderItem?
 
     @State private var burstTime: TimeInterval = 0
@@ -1575,7 +1851,6 @@ public struct LoopRadialArtwork: View {
         mode: LoopRadialMode = .appSwitcher,
         layoutTarget: RadialLayoutTarget = .stage,
         splitSectorIndex: Int? = nil,
-        splitOuterRingActive: Bool = false,
         lockedSplitAppItem: LoopRadialRenderItem? = nil
     ) {
         self.items = items
@@ -1590,7 +1865,6 @@ public struct LoopRadialArtwork: View {
         self.mode = mode
         self.layoutTarget = layoutTarget
         self.splitSectorIndex = splitSectorIndex
-        self.splitOuterRingActive = splitOuterRingActive
         self.lockedSplitAppItem = lockedSplitAppItem
     }
 
@@ -1610,15 +1884,6 @@ public struct LoopRadialArtwork: View {
     public var body: some View {
         ZStack {
             particlesLayer
-            if mode == .splitLayout && splitOuterRingActive {
-                Circle()
-                    .strokeBorder(
-                        palette.primary.opacity(0.45),
-                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
-                    )
-                    .frame(width: metrics.ringDiameter + 28, height: metrics.ringDiameter + 28)
-                    .transition(.scale(scale: 0.94).combined(with: .opacity))
-            }
             ringBody(metrics: metrics, palette: palette)
             if mode == .splitLayout && splitSectorIndex == nil {
                 Circle()
@@ -1692,7 +1957,8 @@ public struct LoopRadialArtwork: View {
                 committedIndex: committedIndex,
                 isShown: isShown,
                 accent: accent,
-                appearStyle: appearStyle
+                appearStyle: appearStyle,
+                animationSpeed: settings.ringAnimationSpeed
             )
         }
     }
@@ -1727,9 +1993,14 @@ public struct LoopRadialArtwork: View {
                 .transition(.scale(scale: 0.72).combined(with: .opacity))
                 .id(picked.id)
         } else if items.isEmpty {
-            Image(systemName: "plus")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.secondary)
+            VStack(spacing: 3) {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(L10n.t("松手添加应用", "Release to Add"))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1829,7 +2100,9 @@ public struct LoopRadialArtwork: View {
                 sweepDegrees: hasSelection ? targetSweep : 6
             )
             .animation(
-                (reduceMotion || settings.animationSpeed.isInstant) ? nil : .spring(response: 0.30, dampingFraction: 0.72),
+                (reduceMotion || settings.ringAnimationSpeed.isInstant)
+                    ? nil
+                    : .spring(response: max(0.14, settings.ringAnimationSpeed.ringSpringResponse * 1.15), dampingFraction: 0.76),
                 value: hasSelection
             )
             .rotationEffect(.degrees(wedgeRotationDegrees))
@@ -2685,6 +2958,7 @@ private struct LoopArtworkSatellite: View {
     let isShown: Bool
     let accent: Color
     var appearStyle: AppearAnimationStyle = .roll
+    var animationSpeed: AnimationSpeedPreset = .fast
 
     var body: some View {
         let angle = -Double.pi / 2 + 2 * Double.pi * Double(index) / Double(max(1, count))
@@ -2692,7 +2966,7 @@ private struct LoopArtworkSatellite: View {
         let isSelected = selectedIndex == index || isCommitted
         let anySelected = selectedIndex != nil
         // On commit the picked icon swells and drifts outward while the rest fold inward.
-        // "闪现" keeps icons in place and only fades; the other styles fly them out from the center.
+        // "闪现" keeps icons in place and only fades; "卷动" flies them out from the center.
         let flash = appearStyle == .flash
         let hiddenRadius = flash ? metrics.orbit : metrics.orbit * 0.58
         let hiddenScale: CGFloat = flash ? 1.0 : 0.45
@@ -2706,6 +2980,19 @@ private struct LoopArtworkSatellite: View {
             : (item.isRunning
                ? (isSelected || !anySelected ? 1.0 : 0.88)
                : (isSelected ? 0.98 : (anySelected ? 0.42 : 0.54)))
+
+        let showAnimation: Animation? = {
+            if animationSpeed.isInstant { return nil }
+            if flash {
+                return .easeOut(duration: max(0.08, animationSpeed.fadeOutDuration))
+            }
+            let resp = max(0.14, animationSpeed.ringSpringResponse * 1.10)
+            let stagger = isShown ? Double(index) * (0.012 * animationSpeed.springScale) : 0
+            return .spring(response: resp, dampingFraction: 0.78).delay(stagger)
+        }()
+        let hoverAnimation: Animation? = animationSpeed.isInstant
+            ? nil
+            : .interactiveSpring(response: max(0.12, animationSpeed.ringSpringResponse * 0.85), dampingFraction: 0.80)
 
         Image(nsImage: item.icon)
             .resizable()
@@ -2729,12 +3016,8 @@ private struct LoopArtworkSatellite: View {
             .scaleEffect(targetScale)
             .opacity(iconOpacity)
             .offset(x: cos(angle) * targetRadius, y: sin(angle) * targetRadius)
-            .animation(
-                .spring(response: 0.28, dampingFraction: 0.72)
-                    .delay(isShown ? Double(index) * 0.014 : 0),
-                value: isShown
-            )
-            .animation(.interactiveSpring(response: 0.20, dampingFraction: 0.78), value: selectedIndex)
+            .animation(showAnimation, value: isShown)
+            .animation(hoverAnimation, value: selectedIndex)
     }
 }
 
@@ -2825,6 +3108,25 @@ private struct LoopPreviewView: View {
                                 .lineLimit(1)
                         }
                         .padding(16)
+                    }
+
+                    if state.customWindowScale < 0.999 || state.isResizeModifierActiveUI {
+                        VStack {
+                            Spacer()
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("\(Int(round(state.customWindowScale * 100)))%")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .monospacedDigit()
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.75))
+                            .padding(.bottom, 14)
+                        }
                     }
 
                     RoundedRectangle(cornerRadius: radius, style: .continuous)

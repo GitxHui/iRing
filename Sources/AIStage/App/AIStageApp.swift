@@ -39,6 +39,11 @@ final class AIStageAppDelegate: NSObject, NSApplicationDelegate {
         coordinator = StageCoordinator()
         dockController = DockPanelController(coordinator: coordinator)
         loopRadialController = LoopRadialController(coordinator: coordinator)
+        coordinator.onAccessibilityTrustChanged = { [weak self] trusted in
+            if trusted {
+                self?.loopRadialController.refreshEventTapIfTrusted()
+            }
+        }
         menuBarController = MenuBarController(coordinator: coordinator, dockController: dockController)
         coordinator.start()
         dockController.showOnboardingWindowIfNeeded()

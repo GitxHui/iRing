@@ -26,13 +26,14 @@ public struct DockView: View {
     @State private var cellCenters: [String: CGPoint] = [:]
 
     private var iconSize: CGFloat { CGFloat(coordinator.settings.iconSize) }
-    private var iconSpacing: CGFloat { CGFloat(coordinator.settings.iconSpacing) }
-    private var islandContentPadding: CGFloat { max(8, CGFloat(coordinator.settings.islandContentPadding)) }
+    private var iconSpacing: CGFloat { max(2, round(iconSize * 0.05)) }
+    private var islandContentPadding: CGFloat { max(4, round(iconSize * 0.13)) }
+    private var expandedTopFlare: CGFloat { min(12, max(9, round(iconSize * 0.25))) }
     private var adaptiveIndicatorSize: CGFloat { CGFloat(coordinator.settings.effectiveIndicatorSize) }
-    private var pillWidth: CGFloat { iconSize + 8 }
-    private var pillHeight: CGFloat { iconSize + 10 }
-    private var pillCornerRadius: CGFloat { min(18, max(9, iconSize * 0.30)) }
-    private var actionButtonSize: CGFloat { max(24, min(52, round(iconSize * 0.82))) }
+    private var pillWidth: CGFloat { iconSize + 4 }
+    private var pillHeight: CGFloat { iconSize + 4 }
+    private var pillCornerRadius: CGFloat { min(16, max(8, iconSize * 0.28)) }
+    private var actionButtonSize: CGFloat { max(20, min(46, round(iconSize * 0.78))) }
 
     private var isIslandExpanded: Bool {
         coordinator.isDynamicIslandExpanded || coordinator.settings.dynamicIslandPinned
@@ -64,6 +65,7 @@ public struct DockView: View {
     }
 
     public var body: some View {
+        let _ = coordinator.settings.language
         ZStack(alignment: rootAlignment) {
             if coordinator.settings.dockShape == .dynamicIsland {
                 dynamicIslandBody
@@ -131,23 +133,36 @@ public struct DockView: View {
         let contentP = min(1.0, max(0.0, (p - 0.12) / 0.88))
         let anchor = edgeUnitPoint
         let slide = contentSlideOffset
-        let topFlare: CGFloat = 10 + 4 * p
-        let bottomRadius: CGFloat = 14 + 10 * p
+        let flareTarget = expandedTopFlare
+        let topFlare: CGFloat = 9 + max(0, flareTarget - 9) * p
+        let bottomRadius: CGFloat = 12 + 8 * p
         let islandShape = DynamicIslandShape(topFlare: topFlare, bottomRadius: bottomRadius, edge: islandEdge)
+        let rawOverflow: CGFloat = (coordinator.settings.islandExpandAxis == .alongEdge)
+            ? DisplayGeometry.magnificationOverflow(settings: coordinator.settings)
+            : 0
+        let activeOverflow = rawOverflow * p
 
-        return ZStack(alignment: rootAlignment) {
-            islandBackground(
-                topFlare: topFlare,
-                bottomRadius: bottomRadius,
-                progress: p
-            )
+        return GeometryReader { geo in
+            let bgWidth = (islandEdge.isVertical && rawOverflow > 0)
+                ? max(24, geo.size.width - activeOverflow)
+                : geo.size.width
+            let bgHeight = (!islandEdge.isVertical && rawOverflow > 0)
+                ? max(24, geo.size.height - activeOverflow)
+                : geo.size.height
 
-            // Clip inner content strictly inside the Dynamic Island shell so scrolled icons
-            // and bottom status dots can never leak outside the concave ear walls or glass rim.
             ZStack(alignment: rootAlignment) {
+                islandBackground(
+                    topFlare: topFlare,
+                    bottomRadius: bottomRadius,
+                    progress: p
+                )
+                .frame(width: bgWidth, height: bgHeight)
+
                 if p < 0.98 {
                     let outP = min(1, p * 2.1)
                     collapsedDynamicIslandContent
+                        .frame(width: bgWidth, height: bgHeight)
+                        .clipShape(islandShape)
                         .opacity(Double(max(0, 1 - outP)))
                         .scaleEffect(1.0 - 0.06 * min(1, p * 2), anchor: anchor)
                         .blur(radius: 5 * outP)
@@ -156,20 +171,36 @@ public struct DockView: View {
 
                 if p > 0.02 {
                     let remaining = 1 - contentP
-                    expandedDynamicIslandContent
-                        .opacity(Double(contentP))
-                        .scaleEffect(0.92 + 0.08 * contentP, anchor: anchor)
-                        .offset(x: slide.width * remaining, y: slide.height * remaining)
-                        .blur(radius: 5 * remaining)
-                        .allowsHitTesting(p > 0.45)
+                    let expandedView = expandedDynamicIslandContent(
+                        bgWidth: bgWidth,
+                        bgHeight: bgHeight,
+                        panelWidth: geo.size.width,
+                        panelHeight: geo.size.height,
+                        flareInset: flareTarget
+                    )
+                    .opacity(Double(contentP))
+                    .scaleEffect(0.92 + 0.08 * contentP, anchor: anchor)
+                    .offset(x: slide.width * remaining, y: slide.height * remaining)
+                    .blur(radius: 5 * remaining)
+                    .allowsHitTesting(p > 0.45)
+
+                    if p < 0.96 || rawOverflow <= 0 {
+                        expandedView
+                            .frame(width: bgWidth, height: bgHeight)
+                            .clipShape(islandShape)
+                    } else {
+                        expandedView
+                            .frame(width: geo.size.width, height: geo.size.height, alignment: rootAlignment)
+                    }
                 }
 
                 if coordinator.isDraggingDock, let previewEdge = coordinator.dragPreviewEdge {
                     dockSnapPreviewBanner(edge: previewEdge)
+                        .frame(width: bgWidth, height: bgHeight)
+                        .clipShape(islandShape)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(islandShape)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: rootAlignment)
         }
         .environment(\.colorScheme, isAppleGlassIsland ? systemColorScheme : .dark)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -179,7 +210,7 @@ public struct DockView: View {
         HStack(spacing: 5) {
             Image(systemName: "pin.fill")
                 .font(.system(size: 10, weight: .semibold))
-            Text("松手固定到\(edge.label)")
+            Text(L10n.t("松手固定到\(edge.label)", "Release to snap to \(edge.label)"))
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
         }
@@ -204,95 +235,121 @@ public struct DockView: View {
         }
     }
 
-    private func glassBlurAlpha(style: AppleGlassStyle, opacity: Double) -> CGFloat {
-        switch style {
-        case .clear: return min(1.0, max(0.42, CGFloat(0.42 + opacity * 0.75)))
-        case .regular: return min(1.0, max(0.55, CGFloat(0.58 + opacity * 0.60)))
-        case .frosted: return min(1.0, max(0.72, CGFloat(0.74 + opacity * 0.36)))
-        }
+    private func glassRimAngularGradient(peak: Double, mid: Double) -> AngularGradient {
+        AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: Color.white.opacity(mid), location: 0.00),
+                .init(color: Color.white.opacity(peak * 0.92), location: 0.125),
+                .init(color: Color.white.opacity(mid), location: 0.25),
+                .init(color: Color.white.opacity(peak * 0.72), location: 0.375),
+                .init(color: Color.white.opacity(mid * 1.1), location: 0.50),
+                .init(color: Color.white.opacity(peak), location: 0.625),
+                .init(color: Color.white.opacity(mid), location: 0.75),
+                .init(color: Color.white.opacity(peak * 0.78), location: 0.875),
+                .init(color: Color.white.opacity(mid), location: 1.00)
+            ]),
+            center: .center
+        )
     }
 
     @ViewBuilder
     private func islandBackground(topFlare: CGFloat, bottomRadius: CGFloat, progress: CGFloat) -> some View {
         let t = Double(min(1, max(0, progress)))
         let shape = DynamicIslandShape(topFlare: topFlare, bottomRadius: bottomRadius, edge: islandEdge)
+        let openRim = DynamicIslandShape(topFlare: topFlare, bottomRadius: bottomRadius, edge: islandEdge, closeAttachedEdge: false)
         if isAppleGlassIsland {
             let isDark = systemColorScheme == .dark
-            let style = coordinator.settings.glassStyle
-            let frost = coordinator.settings.glassOpacity
-            let spec = coordinator.settings.glassSpecularIntensity
-            let material = glassMaterial(for: style)
-            let blurAlpha = glassBlurAlpha(style: style, opacity: frost)
-            let tintColors: [Color] = isDark
-                ? [Color.white.opacity(frost * 0.32), Color.white.opacity(frost * 0.10)]
-                : [Color.white.opacity(frost * 0.62), Color.white.opacity(frost * 0.22)]
-            let rimColors: [Color] = [
-                Color.white.opacity(isDark ? spec * 0.55 : spec * 0.92),
-                Color.white.opacity(isDark ? spec * 0.16 : spec * 0.28),
-                Color.white.opacity(isDark ? spec * 0.36 : spec * 0.62)
-            ]
+            let frost = coordinator.settings.clampedGlassOpacity
+            let layers = StageSettings.glassLayerOpacities(forFrost: frost)
+            let rim = StageSettings.glassRimMetrics(forFrost: frost, isDark: isDark)
+            let bodySheenColors: [Color] = isDark
+                ? [
+                    Color(white: 0.22).opacity(0.18 + layers.tintVeil * 0.38),
+                    Color(white: 0.08).opacity(0.10 + layers.tintVeil * 0.28),
+                    Color(white: 0.14).opacity(0.14 + layers.tintVeil * 0.34)
+                ]
+                : [
+                    Color.white.opacity(0.14 + layers.tintVeil * 0.48),
+                    Color.white.opacity(0.05 + layers.tintVeil * 0.28),
+                    Color.white.opacity(0.11 + layers.tintVeil * 0.36)
+                ]
 
             ZStack {
-                IslandFrostedBackdrop(
-                    topFlare: topFlare,
-                    bottomRadius: bottomRadius,
-                    edge: islandEdge,
-                    material: material,
-                    blurAlpha: blurAlpha
-                )
+                if #available(macOS 26.0, *) {
+                    if layers.clearBlur > 0.005 {
+                        Color.clear
+                            .glassEffect(.clear, in: shape)
+                            .opacity(layers.clearBlur)
+                    }
+                    if layers.regularBlur > 0.005 {
+                        Color.clear
+                            .glassEffect(.regular, in: shape)
+                            .opacity(layers.regularBlur)
+                    }
+                } else if layers.clearBlur > 0.005 {
+                    let material = glassMaterial(for: StageSettings.derivedGlassStyle(forOpacity: frost))
+                    let blurAlpha = CGFloat(layers.clearBlur * 0.55 + layers.regularBlur * 0.45)
+                    IslandFrostedBackdrop(
+                        topFlare: topFlare,
+                        bottomRadius: bottomRadius,
+                        edge: islandEdge,
+                        material: material,
+                        blurAlpha: blurAlpha
+                    )
+                }
 
+                // Optical glass sheen + progressive milky tint
                 shape
                     .fill(
                         LinearGradient(
-                            colors: tintColors,
+                            colors: bodySheenColors,
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .overlay(
-                        shape.strokeBorder(
-                            LinearGradient(
-                                colors: rimColors,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.9
-                        )
+
+                // Layer 1: Soft inner glass-wall depth band (blurred strictly inside shape)
+                openRim
+                    .inset(by: 1.3)
+                    .stroke(
+                        glassRimAngularGradient(peak: rim.bevelPeakAlpha, mid: rim.bevelMidAlpha),
+                        style: StrokeStyle(lineWidth: rim.bevelWidth, lineCap: .round, lineJoin: .round)
                     )
-                    .shadow(color: Color.black.opacity(0.16 + 0.08 * t), radius: 8 + 6 * t, y: 3 + 3 * t)
+                    .blur(radius: rim.bevelBlur)
+                    .clipShape(shape)
+
+                // Layer 2: Directional curved-corner specular catch-lights (adapts with clarity slider)
+                openRim
+                    .inset(by: 0.75)
+                    .stroke(
+                        glassRimAngularGradient(peak: rim.specularPeakAlpha, mid: rim.specularMidAlpha),
+                        style: StrokeStyle(lineWidth: 1.05, lineCap: .round, lineJoin: .round)
+                    )
+                    .clipShape(shape)
+
+                // Layer 3: Delicate outer dark-glass refractive contour (adapts with clarity slider)
+                openRim
+                    .inset(by: 0.3)
+                    .stroke(
+                        Color.black.opacity(rim.outerContactAlpha),
+                        style: StrokeStyle(lineWidth: 0.6, lineCap: .round, lineJoin: .round)
+                    )
             }
         } else {
-            // Interpolate everything with progress so shadow and rim never pop at a threshold.
+            // Interpolate everything with progress so rim never pops at a threshold.
             let isNotchTop = (islandEdge == .top && coordinator.screenHasNotch)
-            let collapsedShadowAlpha = isNotchTop ? 0.24 : 0.34
-            let collapsedShadowRadius: CGFloat = isNotchTop ? 5 : 9
             let rimAlpha = isNotchTop ? 0.14 * min(1, t * 2.5) : 0.14
             shape
                 .fill(isNotchTop ? Color.black : Color.black.opacity(0.94))
                 .overlay(
-                    shape.strokeBorder(
-                        Color.white.opacity(rimAlpha),
-                        lineWidth: 0.7
-                    )
-                )
-                .shadow(
-                    color: Color.black.opacity(collapsedShadowAlpha + (0.45 - collapsedShadowAlpha) * t),
-                    radius: collapsedShadowRadius + (18 - collapsedShadowRadius) * CGFloat(t),
-                    y: 2 + 4 * CGFloat(t)
+                    openRim
+                        .inset(by: 0.35)
+                        .stroke(
+                            Color.white.opacity(rimAlpha),
+                            style: StrokeStyle(lineWidth: 0.7, lineCap: .round, lineJoin: .round)
+                        )
                 )
         }
-    }
-
-    /// Active app first, then the other running apps (stage order). The active app is always
-    /// shown, even when it is not running, so a hotkey switch is visible at a glance.
-    private var collapsedIconApps: (active: StageAppItem?, others: [StageAppItem]) {
-        let activeItem = coordinator.apps.first(where: { $0.bundleIdentifier == coordinator.activeBundleID })
-            ?? coordinator.displayedApps.first
-        let others = coordinator.apps.filter {
-            $0.bundleIdentifier != activeItem?.bundleIdentifier
-                && coordinator.runtimeInfo[$0.bundleIdentifier]?.isRunning == true
-        }
-        return (activeItem, others)
     }
 
     private func collapsedIcon(_ item: StageAppItem, size: CGFloat, isActive: Bool) -> some View {
@@ -326,14 +383,21 @@ public struct DockView: View {
                 .id(item.bundleIdentifier)
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else {
-            Image(systemName: "sparkles")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(labelColor.opacity(0.86))
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                if !isCollapsedVertical && !(islandEdge == .top && coordinator.screenHasNotch) {
+                    Text(L10n.t("添加应用", "Add Apps"))
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(labelColor.opacity(0.88))
         }
     }
 
     private var collapsedDynamicIslandContent: some View {
-        let (activeItem, otherRunningApps) = collapsedIconApps
+        let (activeItem, otherRunningApps) = coordinator.collapsedIconApps
         let statusColor = collapsedStatusDotColor
         let labelColor: Color = isAppleGlassIsland ? .primary : .white
         let activeSize: CGFloat = 20
@@ -397,14 +461,32 @@ public struct DockView: View {
                 .padding(.horizontal, 14)
             }
 
-            whitespaceDragSurface(onTap: { coordinator.setDynamicIslandExpanded(true) })
+            whitespaceDragSurface(onTap: {
+                if coordinator.apps.isEmpty {
+                    onOpenAddApp()
+                } else {
+                    coordinator.setDynamicIslandExpanded(true)
+                }
+            })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .animation(.spring(response: 0.30, dampingFraction: 0.80), value: coordinator.activeBundleID)
+        .animation(islandSpring(baseResponse: 0.28, damping: 0.80), value: coordinator.activeBundleID)
         .contextMenu { overflowMenuItems }
-        .help("点击展开或按住空白处拖动停靠到屏幕顶部、底端、左端、右端")
+        .help(L10n.t(
+            "点击展开或按住空白处拖动停靠到屏幕顶部、底端、左端、右端",
+            "Click to expand or drag empty space to snap to Top, Bottom, Left, or Right edge"
+        ))
+    }
+
+    private func islandSpring(baseResponse: Double, damping: Double, interactive: Bool = false) -> Animation? {
+        let speed = coordinator.settings.islandAnimationSpeed
+        guard !speed.isInstant else { return nil }
+        let response = max(0.08, baseResponse * speed.springScale)
+        return interactive
+            ? .interactiveSpring(response: response, dampingFraction: damping)
+            : .spring(response: response, dampingFraction: damping)
     }
 
     private func whitespaceDragSurface(onTap: (() -> Void)? = nil) -> some View {
@@ -417,94 +499,148 @@ public struct DockView: View {
         )
     }
 
-    private var expandedDynamicIslandContent: some View {
-        let topBand: CGFloat = (islandEdge == .top && coordinator.screenHasNotch)
-            ? max(32, coordinator.screenNotchHeight)
-            : DisplayGeometry.islandHeaderInset
-        let flareInset: CGFloat = 14
-
-        return Group {
-            if isExpandedVertical {
-                VStack(spacing: 0) {
-                    if islandEdge == .top && coordinator.screenHasNotch {
-                        Color.clear
-                            .frame(height: max(32, coordinator.screenNotchHeight))
-                    }
-
-                    GeometryReader { proxy in
-                        let vAlign: HorizontalAlignment = islandEdge == .right ? .trailing : (islandEdge == .left ? .leading : .center)
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(alignment: vAlign, spacing: iconSpacing) {
-                                groupedAppCells
-                                inlineAddButton(size: actionButtonSize)
-                                islandOverflowButton(size: actionButtonSize)
-                            }
-                            .padding(.vertical, islandContentPadding)
-                            .padding(.horizontal, max(10, round(islandContentPadding * 0.55)))
-                            .frame(
-                                minWidth: max(0, proxy.size.width),
-                                minHeight: max(0, proxy.size.height),
-                                alignment: .center
-                            )
-                            .background {
-                                whitespaceDragSurface()
-                            }
-                        }
-                    }
-                    .padding(.vertical, islandEdge.isVertical ? flareInset : 0)
-                    .padding(.horizontal, !islandEdge.isVertical ? flareInset : 4)
-                    .padding(.bottom, islandEdge == .top ? 8 : 0)
-                    .padding(.top, islandEdge == .bottom ? 8 : 0)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    if islandEdge == .bottom {
-                        horizontalIslandTray
-                            .padding(.horizontal, !islandEdge.isVertical ? flareInset : 0)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                        Color.clear.frame(height: topBand)
-                    } else {
-                        Color.clear.frame(height: topBand)
-                        horizontalIslandTray
-                            .padding(.horizontal, !islandEdge.isVertical ? flareInset : 0)
-                            .padding(.top, 2)
-                            .padding(.bottom, islandEdge == .top ? 8 : 2)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            whitespaceDragSurface()
-        }
-        .contextMenu { overflowMenuItems }
+    private func estimatedExpandedTraySpan() -> CGFloat {
+        let count = CGFloat(max(1, coordinator.displayedApps.count))
+        let showSep = coordinator.settings.sortRunningAppsFirst
+            && !coordinator.runningDisplayedApps.isEmpty
+            && !coordinator.inactiveDisplayedApps.isEmpty
+        let sepExtra: CGFloat = showSep ? 7 : 0
+        let pitch = pillWidth + iconSpacing
+        return islandContentPadding * 2 + (count + 2) * pitch - iconSpacing + sepExtra
     }
 
-    private var horizontalIslandTray: some View {
-        let isBottom = (islandEdge == .bottom)
-        return GeometryReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: isBottom ? .bottom : .top, spacing: iconSpacing) {
+    private func expandedDynamicIslandContent(
+        bgWidth: CGFloat,
+        bgHeight: CGFloat,
+        panelWidth: CGFloat,
+        panelHeight: CGFloat,
+        flareInset: CGFloat
+    ) -> some View {
+        let horizEdgeInset = DisplayGeometry.horizontalIslandEdgeInset(for: coordinator.settings)
+        let vertEdgeInset = DisplayGeometry.verticalIslandEdgeInset(for: coordinator.settings)
+        let topBand: CGFloat = (islandEdge == .top && coordinator.screenHasNotch)
+            ? max(32, coordinator.screenNotchHeight)
+            : horizEdgeInset
+        let showDot = coordinator.settings.indicatorStyle != .hidden
+        let horizDotOuterPad: CGFloat = showDot ? DisplayGeometry.islandIndicatorOuterPadding : horizEdgeInset
+        let vertDotOuterPad: CGFloat = showDot ? DisplayGeometry.islandIndicatorOuterPadding : vertEdgeInset
+        let dotPad: CGFloat = showDot ? (max(4, adaptiveIndicatorSize) + DisplayGeometry.verticalIndicatorGap) : 0
+        let actionLeadingPad: CGFloat = (isExpandedVertical && islandEdge == .left) ? dotPad : 0
+        let actionTrailingPad: CGFloat = (isExpandedVertical && islandEdge == .right) ? dotPad : 0
+        let horizActionBotPad: CGFloat = (islandEdge == .bottom && showDot)
+            ? (max(4, adaptiveIndicatorSize) + DisplayGeometry.horizontalIndicatorGap)
+            : 0
+        let estimatedSpan = estimatedExpandedTraySpan()
+
+        return ZStack(alignment: rootAlignment) {
+            whitespaceDragSurface()
+                .frame(width: bgWidth, height: bgHeight)
+
+            if isExpandedVertical {
+                let innerVAvail = max(40, bgHeight - (islandEdge.isVertical ? flareInset * 2 : 8) - (islandEdge == .top && coordinator.screenHasNotch ? max(32, coordinator.screenNotchHeight) : 0))
+                let needsVScroll = estimatedSpan > innerVAvail + 1
+                let vAlign: HorizontalAlignment = islandEdge == .right ? .trailing : (islandEdge == .left ? .leading : .center)
+                let vStack = VStack(alignment: vAlign, spacing: iconSpacing) {
                     groupedAppCells
                     inlineAddButton(size: actionButtonSize)
+                        .padding(.leading, actionLeadingPad)
+                        .padding(.trailing, actionTrailingPad)
                     islandOverflowButton(size: actionButtonSize)
+                        .padding(.leading, actionLeadingPad)
+                        .padding(.trailing, actionTrailingPad)
+                }
+                .padding(.vertical, islandContentPadding)
+                .padding(.leading, islandEdge == .left ? vertDotOuterPad : vertEdgeInset)
+                .padding(.trailing, islandEdge == .right ? vertDotOuterPad : vertEdgeInset)
+
+                if needsVScroll {
+                    VStack(spacing: 0) {
+                        if islandEdge == .top && coordinator.screenHasNotch {
+                            Color.clear
+                                .frame(height: max(32, coordinator.screenNotchHeight))
+                        }
+                        GeometryReader { proxy in
+                            ScrollView(.vertical, showsIndicators: false) {
+                                vStack
+                                    .frame(
+                                        minWidth: max(0, proxy.size.width),
+                                        minHeight: max(0, proxy.size.height),
+                                        alignment: islandEdge == .right ? .trailing : (islandEdge == .left ? .leading : .center)
+                                    )
+                                    .background {
+                                        whitespaceDragSurface()
+                                    }
+                            }
+                        }
+                        .padding(.vertical, islandEdge.isVertical ? flareInset : 2)
+                        .padding(.horizontal, !islandEdge.isVertical ? flareInset : 0)
+                    }
+                    .frame(width: panelWidth, height: panelHeight)
+                } else {
+                    vStack
+                        .padding(.top, (islandEdge == .top && coordinator.screenHasNotch) ? max(32, coordinator.screenNotchHeight) : (islandEdge.isVertical ? flareInset : 2))
+                        .padding(.bottom, islandEdge.isVertical ? flareInset : 2)
+                        .frame(
+                            width: panelWidth,
+                            height: panelHeight,
+                            alignment: islandEdge == .right ? .trailing : (islandEdge == .left ? .leading : .center)
+                        )
+                }
+            } else {
+                let innerHAvail = max(40, bgWidth - (!islandEdge.isVertical ? flareInset * 2 : 0))
+                let needsHScroll = estimatedSpan > innerHAvail + 1
+                let vCellAlign: VerticalAlignment = islandEdge == .bottom ? .bottom : (islandEdge == .top ? .top : .center)
+                let hStack = HStack(alignment: vCellAlign, spacing: iconSpacing) {
+                    groupedAppCells
+                    inlineAddButton(size: actionButtonSize)
+                        .padding(.bottom, horizActionBotPad)
+                    islandOverflowButton(size: actionButtonSize)
+                        .padding(.bottom, horizActionBotPad)
                 }
                 .padding(.horizontal, islandContentPadding)
-                .padding(.vertical, 2)
-                .frame(minWidth: max(0, proxy.size.width), minHeight: max(0, proxy.size.height), alignment: .center)
-                .background {
-                    whitespaceDragSurface()
+                .padding(.top, topBand)
+                .padding(.bottom, horizDotOuterPad)
+
+                if needsHScroll {
+                    GeometryReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            hStack
+                                .frame(
+                                    minWidth: max(0, proxy.size.width),
+                                    minHeight: max(0, proxy.size.height),
+                                    alignment: islandEdge == .bottom ? .bottom : (islandEdge == .top ? .top : .center)
+                                )
+                                .background {
+                                    whitespaceDragSurface()
+                                }
+                        }
+                    }
+                    .padding(.horizontal, !islandEdge.isVertical ? flareInset : 2)
+                    .frame(width: panelWidth, height: panelHeight)
+                } else {
+                    hStack
+                        .frame(
+                            width: max(0, bgWidth - (!islandEdge.isVertical ? flareInset * 2 : 4)),
+                            height: panelHeight,
+                            alignment: islandEdge == .bottom ? .bottom : (islandEdge == .top ? .top : .center)
+                        )
                 }
             }
         }
+        .frame(width: panelWidth, height: panelHeight, alignment: rootAlignment)
+        .contextMenu { overflowMenuItems }
     }
 
     /// Settings button in the tray right after "+", matching the app icon cell footprint and spacing.
     private func islandOverflowButton(size: CGFloat) -> some View {
         let iconTint: Color = isAppleGlassIsland ? .primary : .white
-        return IslandSettingsButton(tint: iconTint, size: size, action: onOpenSettings)
-            .frame(width: pillWidth + 2, height: pillHeight)
+        return IslandSettingsButton(
+            tint: iconTint,
+            size: size,
+            animationSpeed: coordinator.settings.islandAnimationSpeed,
+            action: onOpenSettings
+        )
+            .frame(width: pillWidth, height: pillHeight)
     }
 
     // MARK: - Grouped App Icons
@@ -516,12 +652,15 @@ public struct DockView: View {
         let showSeparator = coordinator.settings.sortRunningAppsFirst
             && !runningApps.isEmpty
             && !inactiveApps.isEmpty
+        let slotLookup = Dictionary(
+            uniqueKeysWithValues: coordinator.numberShortcutApps.enumerated().map { ($0.element.bundleIdentifier, $0.offset) }
+        )
 
         Group {
             if isExpandedVertical {
                 VStack(alignment: .center, spacing: iconSpacing) {
-                    ForEach(Array(runningApps.enumerated()), id: \.element.bundleIdentifier) { idx, item in
-                        makeIconCell(item: item, globalIndex: idx)
+                    ForEach(runningApps, id: \.bundleIdentifier) { item in
+                        makeIconCell(item: item, shortcutSlotIndex: slotLookup[item.bundleIdentifier])
                     }
                     if showSeparator {
                         Capsule()
@@ -529,36 +668,44 @@ public struct DockView: View {
                             .frame(width: max(18, iconSize * 0.62), height: 1)
                             .padding(.vertical, 2)
                     }
-                    ForEach(Array(inactiveApps.enumerated()), id: \.element.bundleIdentifier) { offset, item in
-                        makeIconCell(item: item, globalIndex: runningApps.count + offset)
+                    ForEach(inactiveApps, id: \.bundleIdentifier) { item in
+                        makeIconCell(item: item, shortcutSlotIndex: slotLookup[item.bundleIdentifier])
                     }
                 }
             } else {
                 HStack(alignment: islandEdge == .bottom ? .bottom : .top, spacing: iconSpacing) {
-                    ForEach(Array(runningApps.enumerated()), id: \.element.bundleIdentifier) { idx, item in
-                        makeIconCell(item: item, globalIndex: idx)
+                    ForEach(runningApps, id: \.bundleIdentifier) { item in
+                        makeIconCell(item: item, shortcutSlotIndex: slotLookup[item.bundleIdentifier])
                     }
                     if showSeparator {
                         Capsule()
                             .fill(Color.primary.opacity(0.22))
                             .frame(width: 1, height: max(18, iconSize * 0.62))
                             .padding(.horizontal, 2)
+                            .frame(height: pillHeight)
                     }
-                    ForEach(Array(inactiveApps.enumerated()), id: \.element.bundleIdentifier) { offset, item in
-                        makeIconCell(item: item, globalIndex: runningApps.count + offset)
+                    ForEach(inactiveApps, id: \.bundleIdentifier) { item in
+                        makeIconCell(item: item, shortcutSlotIndex: slotLookup[item.bundleIdentifier])
                     }
                 }
             }
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.80), value: coordinator.activeBundleID)
-        .animation(.spring(response: 0.34, dampingFraction: 0.84), value: coordinator.displayedApps.map(\.bundleIdentifier))
+        .animation(islandSpring(baseResponse: 0.30, damping: 0.80), value: coordinator.activeBundleID)
+        .animation(islandSpring(baseResponse: 0.32, damping: 0.84), value: coordinator.displayedApps.map(\.bundleIdentifier))
     }
 
-    private func makeIconCell(item: StageAppItem, globalIndex: Int) -> some View {
+    private func makeIconCell(item: StageAppItem, shortcutSlotIndex: Int?) -> some View {
         let waveScale = magnificationScale(for: item.bundleIdentifier)
-        let baseSlotW = pillWidth + (isExpandedVertical ? 8 : 2)
-        let baseSlotH = pillHeight + max(4, adaptiveIndicatorSize + 1) + 2
-        let extraSpread = (waveScale - 1.0) * iconSize * 0.56
+        let showDot = coordinator.settings.indicatorStyle != .hidden
+        let dotFootprint: CGFloat = showDot ? max(4, adaptiveIndicatorSize) : 0
+        let dotSpacing: CGFloat = showDot ? (isExpandedVertical ? DisplayGeometry.verticalIndicatorGap : DisplayGeometry.horizontalIndicatorGap) : 0
+        let baseSlotW = isExpandedVertical
+            ? (pillWidth + (islandEdge.isVertical && showDot ? (dotFootprint + dotSpacing) : 0))
+            : pillWidth
+        let baseSlotH = isExpandedVertical
+            ? pillHeight
+            : (pillHeight + dotFootprint + dotSpacing)
+        let extraSpread = (waveScale - 1.0) * iconSize * 0.48
         let slotW = isExpandedVertical ? baseSlotW : (baseSlotW + extraSpread)
         let slotH = isExpandedVertical ? (baseSlotH + extraSpread) : baseSlotH
         let cellAlignment: Alignment = switch islandEdge {
@@ -570,7 +717,7 @@ public struct DockView: View {
 
         return DockAppIconCell(
             item: item,
-            index: globalIndex,
+            shortcutSlotIndex: shortcutSlotIndex,
             iconImage: coordinator.discovery.icon(for: item),
             runtime: coordinator.runtimeInfo[item.bundleIdentifier] ?? AppRuntimeInfo(),
             settings: coordinator.settings,
@@ -649,9 +796,9 @@ public struct DockView: View {
                 )
             }
         }
-        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.78), value: waveScale)
+        .animation(islandSpring(baseResponse: 0.16, damping: 0.78, interactive: true), value: waveScale)
         .onHover { hovering in
-            withAnimation(.spring(response: 0.18, dampingFraction: 0.76)) {
+            withAnimation(islandSpring(baseResponse: 0.18, damping: 0.76)) {
                 hoveredBundleID = hovering ? item.bundleIdentifier : (hoveredBundleID == item.bundleIdentifier ? nil : hoveredBundleID)
             }
         }
@@ -713,7 +860,7 @@ public struct DockView: View {
                 .scaleEffect(1.0 + 0.06 * p)
         }
         .buttonStyle(.plain)
-        .frame(width: pillWidth + 2, height: pillHeight)
+        .frame(width: pillWidth, height: pillHeight)
         .background {
             GeometryReader { geo in
                 let frame = geo.frame(in: .named("dockPanel"))
@@ -723,20 +870,20 @@ public struct DockView: View {
                 )
             }
         }
-        .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.80), value: p)
-        .help("添加应用到工作台")
+        .animation(islandSpring(baseResponse: 0.18, damping: 0.80, interactive: true), value: p)
+        .help(L10n.t("添加应用到 iRing", "Add Apps to iRing"))
     }
 
     @ViewBuilder
     private var overflowMenuItems: some View {
         if coordinator.layoutMode == .split2 {
-            Button("退出双屏对比") {
+            Button(L10n.t("退出双屏对比", "Exit Split View")) {
                 coordinator.exitSplitMode()
             }
         }
-        Button("添加应用…", action: onOpenAddApp)
+        Button(L10n.t("添加应用…", "Add Apps…"), action: onOpenAddApp)
         Divider()
-        Button("偏好设置…", action: onOpenSettings)
+        Button(L10n.t("偏好设置…", "Settings…"), action: onOpenSettings)
     }
 }
 
@@ -745,7 +892,7 @@ public struct DockView: View {
 private struct DockAppIconCell: View {
     @Environment(\.colorScheme) private var systemColorScheme
     let item: StageAppItem
-    let index: Int
+    let shortcutSlotIndex: Int?
     let iconImage: NSImage
     let runtime: AppRuntimeInfo
     let settings: StageSettings
@@ -782,30 +929,40 @@ private struct DockAppIconCell: View {
     }
 
     private var tooltipText: String {
+        let _ = settings.language
         var parts: [String] = [item.displayName]
-        if let prefix = settings.numberSwitchModifier.symbolPrefix, index < 9 {
-            parts.append("\(prefix)\(index + 1)")
+        if let prefix = settings.effectiveNumberSwitchSymbolPrefix,
+           let slot = shortcutSlotIndex, slot < 9 {
+            parts.append("\(prefix)\(slot + 1)")
         }
         if isLaunching {
-            parts.append("启动中…")
+            parts.append(L10n.t("启动中…", "Launching…"))
         } else if runtime.isRunning {
-            parts.append(runtime.memoryMB > 0 ? "运行中 · \(runtime.memoryMB) MB" : "运行中")
+            parts.append(runtime.memoryMB > 0
+                ? L10n.t("运行中 · \(runtime.memoryMB) MB", "Running · \(runtime.memoryMB) MB")
+                : L10n.t("运行中", "Running"))
         } else {
-            parts.append("未运行（点击启动）")
+            parts.append(L10n.t("未运行（点击启动）", "Not Running (Click to Launch)"))
         }
         if let badge = runtime.badgeLabel, !badge.isEmpty {
-            parts.append("未读 \(badge)")
+            parts.append(L10n.t("未读 \(badge)", "\(badge) unread"))
         }
-        parts.append("⌘+点击双屏")
+        parts.append(L10n.t("⌘+点击双屏", "⌘+Click Split"))
         return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        let effectiveScale: CGFloat = isPressed ? (waveScale * 0.90) : (waveScale > 1.02 ? waveScale : (isHovered ? 1.12 : 1.0))
-        let lift = max(0, waveScale - 1.0) * iconSize * 0.14
-        let spacingBelowIcon: CGFloat = max(2.0, round(iconSize * 0.055))
-        let isParallelAxis = (isVerticalLayout == islandEdge.isVertical)
-        let scaleAnchor: UnitPoint = if isParallelAxis {
+        let _ = settings.language
+        let magEnabled = settings.magnificationScale > 1.01
+        let effectiveScale: CGFloat = isPressed
+            ? (waveScale * 0.90)
+            : (magEnabled ? (waveScale > 1.02 ? waveScale : (isHovered ? 1.08 : 1.0)) : 1.0)
+        let isAlongEdge = (settings.islandExpandAxis == .alongEdge)
+        let lift = max(0, waveScale - 1.0) * iconSize * (isAlongEdge ? 0.08 : 0.04)
+        let spacingToIndicator: CGFloat = DisplayGeometry.horizontalIndicatorGap
+        let isEdgeVertical = isVerticalLayout && islandEdge.isVertical
+        let showIndicator = settings.indicatorStyle != .hidden
+        let scaleAnchor: UnitPoint = if isAlongEdge {
             switch islandEdge {
             case .top: .top
             case .bottom: .bottom
@@ -815,83 +972,105 @@ private struct DockAppIconCell: View {
         } else {
             .center
         }
-        let waveOffsetX: CGFloat = isParallelAxis
-            ? (islandEdge == .left ? (lift + bounceOffsetY) : (islandEdge == .right ? -(lift + bounceOffsetY) : 0))
+        let waveOffsetX: CGFloat = isEdgeVertical
+            ? (islandEdge == .left ? (lift + bounceOffsetY) : -(lift + bounceOffsetY))
             : 0
-        let waveOffsetY: CGFloat = isParallelAxis
-            ? (islandEdge == .top ? (lift + bounceOffsetY) : (islandEdge == .bottom ? -(lift + bounceOffsetY) : 0))
-            : (isVerticalLayout ? 0 : -(lift * 0.45 + bounceOffsetY * 0.5))
+        let waveOffsetY: CGFloat = isEdgeVertical
+            ? 0
+            : (islandEdge == .top ? (lift + bounceOffsetY) : (islandEdge == .bottom ? -(lift + bounceOffsetY) : -(lift * 0.45 + bounceOffsetY * 0.5)))
 
-        VStack(spacing: spacingBelowIcon) {
-            ZStack {
-                if isPrimaryActive {
-                    let fillTop = isDarkSurface ? Color.white.opacity(0.18) : Color.white.opacity(0.52)
-                    let fillBot = isDarkSurface ? Color.white.opacity(0.06) : Color.white.opacity(0.20)
-                    let rimTop = isDarkSurface ? Color.white.opacity(0.34) : Color.white.opacity(0.82)
-                    let rimBot = isDarkSurface ? Color.white.opacity(0.08) : Color.white.opacity(0.20)
-                    RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
-                        .fill(LinearGradient(colors: [fillTop, fillBot], startPoint: .top, endPoint: .bottom))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
-                                .strokeBorder(
-                                    LinearGradient(colors: [rimTop, rimBot], startPoint: .top, endPoint: .bottom),
-                                    lineWidth: 0.75
-                                )
-                        )
-                        .shadow(color: Color.black.opacity(isDarkSurface ? 0.20 : 0.08), radius: 4, y: 1.5)
-                        .frame(width: pillWidth, height: pillHeight)
-                        .matchedGeometryEffect(id: "activeGlassPlatter", in: glassNamespace)
+        let iconTile = ZStack {
+            if isPrimaryActive {
+                let fillTop = isDarkSurface ? Color.white.opacity(0.18) : Color.white.opacity(0.52)
+                let fillBot = isDarkSurface ? Color.white.opacity(0.06) : Color.white.opacity(0.20)
+                let rimTop = isDarkSurface ? Color.white.opacity(0.34) : Color.white.opacity(0.82)
+                let rimBot = isDarkSurface ? Color.white.opacity(0.08) : Color.white.opacity(0.20)
+                RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
+                    .fill(LinearGradient(colors: [fillTop, fillBot], startPoint: .top, endPoint: .bottom))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(colors: [rimTop, rimBot], startPoint: .top, endPoint: .bottom),
+                                lineWidth: 0.75
+                            )
+                    )
+                    .shadow(color: Color.black.opacity(isDarkSurface ? 0.20 : 0.08), radius: 4, y: 1.5)
+                    .frame(width: pillWidth, height: pillHeight)
+                    .matchedGeometryEffect(id: "activeGlassPlatter", in: glassNamespace)
+            }
+
+            if isSplitSecondary {
+                RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1)
+                    )
+                    .frame(width: pillWidth, height: pillHeight)
+            }
+
+            Image(nsImage: iconImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
+                .overlay(alignment: .topTrailing) {
+                    if settings.showNotificationBadges, let badge = runtime.badgeLabel, !badge.isEmpty {
+                        MacDockRedBadge(label: badge, iconSize: iconSize)
+                            .offset(x: 4, y: -3)
+                            .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    }
                 }
+                .scaleEffect(effectiveScale, anchor: scaleAnchor)
+                .offset(x: waveOffsetX, y: waveOffsetY)
+                .zIndex(10)
+                .shadow(
+                    color: Color.black.opacity(effectiveScale > 1.05 ? 0.30 : 0.18),
+                    radius: effectiveScale > 1.05 ? 6 : 2.5,
+                    y: effectiveScale > 1.05 ? 3.5 : 1.5
+                )
+        }
+        .frame(width: pillWidth, height: pillHeight)
+        .overlay(alignment: .topLeading) {
+            if isSplitMode && (isPrimaryActive || isSplitSecondary) {
+                Text(isPrimaryActive ? "L" : "R")
+                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 4.5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.92)))
+                    .shadow(color: Color.black.opacity(0.22), radius: 2, y: 1)
+                    .offset(x: -1, y: -1)
+            }
+        }
 
-                if isSplitSecondary {
-                    RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
-                        .fill(Color.primary.opacity(0.08))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
-                                .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1)
-                        )
-                        .frame(width: pillWidth, height: pillHeight)
-                }
-
-                Image(nsImage: iconImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: iconSize, height: iconSize)
-                    .overlay(alignment: .topTrailing) {
-                        if settings.showNotificationBadges, let badge = runtime.badgeLabel, !badge.isEmpty {
-                            MacDockRedBadge(label: badge)
-                                .offset(x: 4, y: -3)
-                                .transition(.scale(scale: 0.4).combined(with: .opacity))
+        Group {
+            if isEdgeVertical {
+                HStack(spacing: showIndicator ? DisplayGeometry.verticalIndicatorGap : 0) {
+                    if islandEdge == .left {
+                        if showIndicator {
+                            statusIndicatorView(verticalOrientation: true)
+                                .frame(width: max(4, adaptiveIndicatorSize))
+                        }
+                        iconTile
+                    } else {
+                        iconTile
+                        if showIndicator {
+                            statusIndicatorView(verticalOrientation: true)
+                                .frame(width: max(4, adaptiveIndicatorSize))
                         }
                     }
-                    .scaleEffect(effectiveScale, anchor: scaleAnchor)
-                    .offset(x: waveOffsetX, y: waveOffsetY)
-                    .zIndex(10)
-                    .shadow(
-                        color: Color.black.opacity(effectiveScale > 1.05 ? 0.30 : 0.18),
-                        radius: effectiveScale > 1.05 ? 6 : 2.5,
-                        y: effectiveScale > 1.05 ? 3.5 : 1.5
-                    )
-            }
-            .frame(width: pillWidth, height: pillHeight)
-            .overlay(alignment: .topLeading) {
-                if isSplitMode && (isPrimaryActive || isSplitSecondary) {
-                    Text(isPrimaryActive ? "L" : "R")
-                        .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4.5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.92)))
-                        .shadow(color: Color.black.opacity(0.22), radius: 2, y: 1)
-                        .offset(x: -1, y: -1)
+                }
+            } else {
+                VStack(spacing: showIndicator ? spacingToIndicator : 0) {
+                    iconTile
+                    if showIndicator {
+                        statusIndicatorView(verticalOrientation: false)
+                            .frame(height: max(4, adaptiveIndicatorSize))
+                    }
                 }
             }
-
-            statusIndicatorView
-                .frame(height: max(4, adaptiveIndicatorSize + 1))
         }
-        .frame(width: pillWidth + 2)
         .contentShape(Rectangle())
         .onChange(of: bounceTrigger) {
             guard settings.animateOpeningApps, bounceTrigger > 0 else { return }
@@ -920,46 +1099,48 @@ private struct DockAppIconCell: View {
         }
         .help(tooltipText)
         .contextMenu {
-            Button("切换到 \(item.displayName)") { onClick(false, false) }
-            Button("拉回到当前舞台屏 (⌥+点击)") { onPullToCurrentScreen() }
+            Button(L10n.t("切换到 \(item.displayName)", "Switch to \(item.displayName)")) { onClick(false, false) }
+            Button(L10n.t("移到当前屏幕 (⌥+点击)", "Move to Current Display (⌥+Click)")) { onPullToCurrentScreen() }
             if !isPrimaryActive {
-                Button("与当前应用双屏对比 (⌘+点击)") { onSplitWithCurrent() }
+                Button(L10n.t("与当前应用双屏对比 (⌘+点击)", "Split with Current App (⌘+Click)")) { onSplitWithCurrent() }
             }
             if isSplitMode {
-                Button("退出双屏对比") { onExitSplit() }
+                Button(L10n.t("退出双屏对比", "Exit Split View")) { onExitSplit() }
             }
             Divider()
             if runtime.isRunning {
                 if runtime.memoryMB > 0 {
-                    Text("当前内存占用：\(runtime.memoryMB) MB")
+                    Text(L10n.t("当前内存占用：\(runtime.memoryMB) MB", "Memory Usage: \(runtime.memoryMB) MB"))
                 }
-                Button("重新启动") { onRelaunch() }
-                Button("彻底退出（释放内存）") { onQuit() }
+                Button(L10n.t("重新启动", "Relaunch")) { onRelaunch() }
+                Button(L10n.t("彻底退出（释放内存）", "Quit App")) { onQuit() }
             } else {
-                Button("启动应用") { onClick(false, false) }
+                Button(L10n.t("启动应用", "Launch App")) { onClick(false, false) }
             }
             Divider()
-            Button("在访达中显示") { onReveal() }
-            Button("从列表移除", role: .destructive) { onRemove() }
+            Button(L10n.t("在访达中显示", "Show in Finder")) { onReveal() }
+            Button(L10n.t("从列表移除", "Remove from iRing"), role: .destructive) { onRemove() }
         }
     }
 
     @ViewBuilder
-    private var statusIndicatorView: some View {
+    private func statusIndicatorView(verticalOrientation: Bool) -> some View {
         let style = settings.indicatorStyle
         let baseSize = max(3.6, adaptiveIndicatorSize * 0.90)
-        let activeW = min(16, max(12, iconSize * 0.30))
-        let activeH = max(3.2, min(4.0, adaptiveIndicatorSize * 0.78))
-        let shouldShow = isPrimaryActive || (style != .hidden && (runtime.isRunning || isLaunching || settings.showInactiveIndicator))
+        let activeW = min(14, max(10, iconSize * 0.26))
+        let activeH = max(3.0, min(3.8, adaptiveIndicatorSize * 0.74))
+        let shouldShow = style != .hidden && (isPrimaryActive || runtime.isRunning || isLaunching || settings.showInactiveIndicator)
 
         if shouldShow {
             let fillColor = resolvedIndicatorColor
-            let indW: CGFloat = isPrimaryActive
+            let rawW: CGFloat = isPrimaryActive
                 ? activeW
                 : (style == .pill ? max(8, baseSize * 2.1) : baseSize)
-            let indH: CGFloat = isPrimaryActive
+            let rawH: CGFloat = isPrimaryActive
                 ? activeH
                 : (style == .pill ? max(2.2, baseSize * 0.56) : baseSize)
+            let indW = verticalOrientation ? rawH : rawW
+            let indH = verticalOrientation ? rawW : rawH
             let haloColor: Color = isPrimaryActive
                 ? (isDarkSurface ? Color.white.opacity(0.55) : Color.primary.opacity(0.28))
                 : fillColor.opacity(runtime.isRunning ? 0.30 : 0.0)
@@ -973,9 +1154,17 @@ private struct DockAppIconCell: View {
                 )
                 .frame(width: indW, height: indH)
                 .shadow(color: haloColor, radius: haloRadius)
-                .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isPrimaryActive)
+                .animation(
+                    settings.islandAnimationSpeed.isInstant
+                        ? nil
+                        : .spring(response: max(0.08, 0.26 * settings.islandAnimationSpeed.springScale), dampingFraction: 0.78),
+                    value: isPrimaryActive
+                )
         } else {
-            Color.clear.frame(width: 1, height: baseSize)
+            Color.clear.frame(
+                width: verticalOrientation ? baseSize : 1,
+                height: verticalOrientation ? 1 : baseSize
+            )
         }
     }
 
@@ -1013,15 +1202,17 @@ private struct DockAppIconCell: View {
 
 private struct MacDockRedBadge: View {
     let label: String
+    var iconSize: CGFloat = 46
     private var displayLabel: String { label.count > 3 ? "99+" : label }
 
     var body: some View {
         let isSingleChar = displayLabel.count <= 1
+        let side = max(15, min(20, round(iconSize * 0.36)))
         Text(displayLabel)
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(.system(size: round(side * 0.62), weight: .bold, design: .rounded))
             .foregroundStyle(.white)
-            .padding(.horizontal, isSingleChar ? 0 : 4.5)
-            .frame(minWidth: 16, minHeight: 16)
+            .padding(.horizontal, isSingleChar ? 0 : round(side * 0.28))
+            .frame(minWidth: side, minHeight: side)
             .background(
                 Capsule()
                     .fill(
@@ -1064,10 +1255,11 @@ private struct DockIconDropDelegate: DropDelegate {
 
 // MARK: - Apple Hardware-Notch Concave Dynamic Island Shape
 
-private struct DynamicIslandShape: InsettableShape {
+private struct DynamicIslandShape: InsettableShape, Sendable {
     let topFlare: CGFloat
     let bottomRadius: CGFloat
     let edge: DockEdgePosition
+    var closeAttachedEdge: Bool = true
     var insetAmount: CGFloat = 0
 
     func inset(by amount: CGFloat) -> some InsettableShape {
@@ -1126,7 +1318,9 @@ private struct DynamicIslandShape: InsettableShape {
             p.addLine(to: CGPoint(x: r.maxX - flare, y: r.maxY - flare))
             p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.maxY), control: CGPoint(x: r.maxX, y: r.maxY - flare))
         }
-        p.closeSubpath()
+        if closeAttachedEdge {
+            p.closeSubpath()
+        }
         return p
     }
 }
@@ -1337,6 +1531,7 @@ private final class DockDragNSView: NSView {
 private struct IslandSettingsButton: View {
     let tint: Color
     let size: CGFloat
+    let animationSpeed: AnimationSpeedPreset
     let action: () -> Void
     @State private var isHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1363,8 +1558,13 @@ private struct IslandSettingsButton: View {
                 .overlay(Circle().strokeBorder(tint.opacity(isHovered ? 0.50 : 0.09), lineWidth: 0.75))
         )
         .scaleEffect(isHovered ? 1.06 : 1.0)
-        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.18, dampingFraction: 0.80), value: isHovered)
+        .animation(
+            (reduceMotion || animationSpeed.isInstant)
+                ? nil
+                : .interactiveSpring(response: max(0.08, 0.18 * animationSpeed.springScale), dampingFraction: 0.80),
+            value: isHovered
+        )
         .onHover { isHovered = $0 }
-        .help("偏好设置")
+        .help(L10n.t("偏好设置", "Settings"))
     }
 }
