@@ -1,6 +1,5 @@
 <div align="center">
-  <img src="docs/icon.png" width="112" height="112" alt="iRing 图标" />
-  <h1>iRing</h1>
+  <h1><img src="docs/iring-hero.svg" width="768" alt="iRing for macOS" /></h1>
   <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
   <p><strong>切应用、分屏、缩放，都在光标处完成。</strong><br />
   按住左 Option（⌥）呼出圆环，用触控板或鼠标整理窗口。</p>
