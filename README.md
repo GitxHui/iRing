@@ -4,21 +4,21 @@
 
 <h1 align="center">iRing</h1>
 
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+
 <p align="center">
-  <strong>iRing = Dock + AltTab + Loop + 窗口自由缩放</strong><br/>
-  按住一颗 <code>左 ⌥</code>，在光标原地切应用、8 向分屏、双指自由缩放。
+  <strong>切应用、分屏、缩放，都在光标处完成。</strong><br/>
+  按住左 Option（⌥）呼出圆环。贴合 MacBook 刘海或屏幕边缘的 Liquid Glass 灵动岛，让常用应用随手可达。
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-15.0%2B-000000?style=flat-square&logo=apple" alt="macOS 15.0+" />
-  <img src="https://img.shields.io/badge/Apple_Silicon-arm64-0A84FF?style=flat-square" alt="Apple Silicon" />
-  <img src="https://img.shields.io/badge/Swift-6.2-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 6.2" />
-  <a href="https://github.com/E-xhui/iRing/releases/tag/v0.1.0-beta.2"><img src="https://img.shields.io/badge/Release-v0.1.0--beta.2-34C759?style=flat-square" alt="Release v0.1.0-beta.2" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-8E8E93?style=flat-square" alt="MIT License" /></a>
+  <a href="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.dmg"><strong>下载 Beta 2（.dmg）</strong></a> ·
+  <a href="https://github.com/GitxHui/iRing/releases/tag/v0.1.0-beta.2">版本说明与校验值</a><br/>
+  macOS 15.0 或更新版本 · Apple 芯片（arm64）
 </p>
 
 <p align="center">
-  <a href="#一图看懂">一图看懂</a> ·
+  <a href="#操作速览">操作速览</a> ·
   <a href="#核心特点">核心特点</a> ·
   <a href="#常见使用场景">使用场景</a> ·
   <a href="#默认手势">默认手势</a> ·
@@ -27,10 +27,7 @@
 
 ---
 
-## 一图看懂
-
-以前想把 macOS 窗口用顺手，得同时装两三个常驻工具，背一串互相打架的快捷键。  
-iRing 把它们合成了一件事：屏幕边缘是一条清透的液态玻璃灵动岛，光标底下是一个圆环。按住 `左 ⌥` 滑切应用，点一下分屏，双指一滑调大小，松手即落位。
+## 操作速览
 
 | 能力 | 以前 | 用 iRing |
 | --- | --- | --- |
@@ -99,8 +96,8 @@ iRing 把它们合成了一件事：屏幕边缘是一条清透的液态玻璃�
 
 > 系统要求：**macOS 15.0+** · **Apple Silicon（arm64）**
 
-- **直接下载 `.dmg` 安装包**：[iRing-v0.1.0-beta.2-macOS-arm64.dmg](https://github.com/E-xhui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.dmg)
-- **Releases 发布页（含 `.zip` 与 SHA256 校验）**：[v0.1.0-beta.2](https://github.com/E-xhui/iRing/releases/tag/v0.1.0-beta.2)
+- **直接下载 `.dmg` 安装包**：[iRing-v0.1.0-beta.2-macOS-arm64.dmg](https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.dmg)
+- **Releases 发布页（含 `.zip` 与 SHA256 校验）**：[v0.1.0-beta.2](https://github.com/GitxHui/iRing/releases/tag/v0.1.0-beta.2)
 
 ### 安装步骤
 
