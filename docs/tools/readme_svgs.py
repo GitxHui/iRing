@@ -50,16 +50,16 @@ THEMES = {
 COPY = {
     "zh": {
         "eyebrow": "iRing for macOS",
-        "tokens": ["一个键", " = ", "切屏", " + ", "分屏", " + ", "缩放", " + ", "Dock"],
-        "sub": "按住左 ⌥ 或鼠标中键，圆环就在光标处打开。",
+        "tokens": ["⌥ / 中键", " = ", "切屏", " + ", "分屏", " + ", "缩放", " + ", "Dock"],
+        "sub": "在光标处，掌控每一个窗口。",
         "sub2": "二分屏 · 四分屏 · 全屏 · 连续缩放 · 灵动岛",
         "dl": "下载 macOS Beta",
         "dl_sub": "免费 · macOS 15+ · Apple 芯片",
     },
     "en": {
         "eyebrow": "iRing for macOS",
-        "tokens": ["One key", " = ", "switch", " + ", "tile", " + ", "resize", " + ", "dock"],
-        "sub": "Hold left ⌥ or the middle mouse button — the ring opens at your cursor.",
+        "tokens": ["⌥ / middle click", " = ", "switch", " + ", "tile", " + ", "resize", " + ", "dock"],
+        "sub": "Every window. Right at your cursor.",
         "sub2": "Halves · Quarters · Full screen · Resize · Dynamic dock",
         "dl": "Download the Mac beta",
         "dl_sub": "Free · macOS 15+ · Apple silicon",
@@ -264,7 +264,7 @@ def text_width(s, size):
 
 NAV = {
     "zh": [("film", "影片"), ("features", "核心功能"), ("details", "更多细节"), ("install", "下载安装"), ("faq", "常见问题")],
-    "en": [("film", "Films"), ("features", "Features"), ("details", "Details"), ("install", "Install"), ("faq", "FAQ")],
+    "en": [("film", "Film"), ("features", "Features"), ("details", "Details"), ("install", "Install"), ("faq", "FAQ")],
 }
 
 

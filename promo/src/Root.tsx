@@ -5,6 +5,9 @@ import { PROMO_FRAMES } from "./timeline";
 import { Loop, CLIPS, LoopProps } from "./Loop";
 import { VideoPoster } from "./VideoPoster";
 import { VerticalPromo } from "./vertical/VerticalPromo";
+import { Film } from "./film/Film";
+import { FilmPoster } from "./film/Poster";
+import { FFPS, FTOTAL } from "./film/contract";
 import { VFPS, VH, VTOTAL, VW } from "./vertical/contract";
 import { Desktop } from "./scenes/Desktop";
 import { FPS, H, W } from "./theme";
@@ -12,6 +15,10 @@ import { FPS, H, W } from "./theme";
 export const RemotionRoot: React.FC = () => {
   return (
     <>
+      <Composition id="FilmPoster-ZH" component={FilmPoster} durationInFrames={1} fps={FFPS} width={W} height={H} defaultProps={{ lang: "zh" as const }} />
+      <Composition id="FilmPoster-EN" component={FilmPoster} durationInFrames={1} fps={FFPS} width={W} height={H} defaultProps={{ lang: "en" as const }} />
+      <Composition id="Film-ZH" component={Film} durationInFrames={Math.round(FTOTAL * FFPS)} fps={FFPS} width={W} height={H} defaultProps={{ lang: "zh" as const, audio: true }} />
+      <Composition id="Film-EN" component={Film} durationInFrames={Math.round(FTOTAL * FFPS)} fps={FFPS} width={W} height={H} defaultProps={{ lang: "en" as const, audio: true }} />
       <Composition
         id="Vertical-ZH"
         component={VerticalPromo}
