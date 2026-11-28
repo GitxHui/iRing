@@ -78,6 +78,11 @@
     .install-card summary{cursor:pointer;color:var(--blue)}
     .install-card details p{margin:.65rem 0 0;color:var(--muted);font-size:.94rem}
     .availability{margin:12px 0 0;color:var(--muted);font-size:.93rem}
+    .brew{margin-top:30px;padding:20px 24px;border:1px solid var(--line);border-radius:15px;background:#121a26}
+    .brew h3{margin:0 0 8px;font-size:1.13rem}
+    .brew-command{display:flex;align-items:center;flex-wrap:wrap;gap:12px 18px}
+    .brew-command code{color:var(--blue);font-size:.96rem;overflow-wrap:anywhere}
+    .brew-command button{border:1px solid var(--line);border-radius:8px;padding:4px 11px;background:var(--surface);color:var(--text);cursor:pointer}
     .foot{border-top:1px solid #ffffff16;padding:23px 0 31px;color:var(--muted)}
     .foot-inner{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
     .foot a+a{margin-left:18px}
@@ -181,6 +186,15 @@
           <p class="availability"><a href="https://github.com/GitxHui/iRing/releases/tag/v0.1.0-beta.2"><span lang="en">Release notes and SHA-256 checksums</span><span lang="zh-CN">版本说明与 SHA-256 校验值</span></a></p>
         </div>
       </div>
+      <div class="wrap brew">
+        <h3>Homebrew</h3>
+        <div class="brew-command">
+          <code id="brew-command">brew install --cask gitxhui/tap/iring</code>
+          <button type="button" id="copy-brew"><span lang="en">Copy</span><span lang="zh-CN">复制</span></button>
+          <span id="copy-status" role="status"></span>
+        </div>
+        <p class="availability"><span lang="en">Installs the same Beta 2 build.</span><span lang="zh-CN">安装的也是 Beta 2 版本。</span> <a href="https://github.com/GitxHui/homebrew-tap"><span lang="en">View the tap</span><span lang="zh-CN">查看 Tap</span></a></p>
+      </div>
     </section>
   </main>
   <footer class="foot"><div class="wrap foot-inner">
@@ -227,6 +241,16 @@
       const url = new URL(location.href);
       url.searchParams.set('lang', language === 'zh-CN' ? 'zh' : 'en');
       history.replaceState(null, '', url);
+    });
+    document.getElementById('copy-brew').addEventListener('click', async () => {
+      const status = document.getElementById('copy-status');
+      const chinese = document.documentElement.lang === 'zh-CN';
+      try {
+        await navigator.clipboard.writeText(document.getElementById('brew-command').textContent);
+        status.textContent = chinese ? '已复制' : 'Copied';
+      } catch {
+        status.textContent = chinese ? '请手动选择并复制命令' : 'Select the command to copy it';
+      }
     });
     const queryLanguage = new URLSearchParams(location.search).get('lang');
     setLanguage(queryLanguage === 'zh' || (queryLanguage !== 'en' && navigator.language.toLowerCase().startsWith('zh')) ? 'zh-CN' : 'en');
