@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="iRing for Mac is a radial app switcher and window manager. Hold left Option to switch apps, tile windows, and resize at your cursor.">
+  <meta property="og:title" content="iRing for Mac">
+  <meta property="og:description" content="Switch apps, tile, and resize windows at your cursor.">
+  <meta property="og:image" content="https://gitxhui.github.io/iRing/media/video-poster-en.jpg">
+  <meta name="theme-color" content="#10141d">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="icon.png">
+  <title>iRing for Mac</title>
+  <style>
+    :root{--bg:#10141d;--surface:#171f2b;--text:#f4f7fc;--muted:#abbbd0;--line:#303e52;--blue:#a8d8ff;--button:#b9e0ff;--button-ink:#09223c;--frame:1120px;--body:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif}
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--bg);color:var(--text);font:1rem/1.65 var(--body);-webkit-font-smoothing:antialiased}
+    a{color:inherit;text-underline-offset:.23em}
+    img,video{display:block;width:100%}
+    button{font:inherit}
+    button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:5px}
+    [hidden]{display:none!important}
+    html:not([lang="zh-CN"]) [lang="zh-CN"],html[lang="zh-CN"] [lang="en"]{display:none!important}
+    .wrap{width:min(var(--frame),calc(100% - 64px));margin:auto}
+    .top{border-bottom:1px solid #ffffff16}
+    .top-inner{display:flex;align-items:center;justify-content:space-between;min-height:76px;gap:18px}
+    .brand{display:flex;align-items:center;gap:9px;text-decoration:none;font-weight:720;font-size:1.17rem;letter-spacing:-.03em;white-space:nowrap}
+    .brand img{width:31px;height:31px}
+    .nav{display:flex;align-items:center;gap:26px}
+    .nav a{color:var(--muted);font-size:.94rem;text-decoration:none}
+    .nav a:hover{color:var(--text)}
+    .langs{display:flex;gap:3px;border:1px solid var(--line);border-radius:99px;padding:3px}
+    .langs button{padding:.24rem .66rem;border:0;border-radius:99px;color:var(--muted);background:transparent;cursor:pointer;font-size:.82rem}
+    .langs button[aria-pressed="true"]{background:#25354b;color:#f4f8ff}
+    main{overflow:hidden}
+    .hero{position:relative;padding:86px 0 80px;background:radial-gradient(ellipse at 87% 17%,#2a497544 0,transparent 55%)}
+    .hero-grid{display:grid;grid-template-columns:minmax(0,.83fr) minmax(0,1.17fr);align-items:center;gap:49px}
+    .release{display:inline-flex;align-items:center;gap:.55rem;color:var(--blue);font-weight:620;font-size:.88rem;margin:0 0 16px}
+    h1,h2,h3,p{margin-top:0}
+    h1{font-size:clamp(3rem,6.4vw,5.65rem);letter-spacing:-.075em;line-height:.96;font-weight:760;margin-bottom:25px}
+    h1 .accent{color:var(--blue)}
+    html[lang="zh-CN"] h1{font-size:clamp(2.55rem,5.1vw,4.85rem);letter-spacing:-.045em;line-height:1.13}
+    .lead{color:var(--muted);font-size:1.1rem;max-width:36ch;margin-bottom:27px}
+    .actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+    .button{display:inline-flex;gap:10px;align-items:center;justify-content:center;min-height:48px;padding:0 19px;background:var(--button);color:var(--button-ink);font-weight:760;text-decoration:none;border:1px solid transparent;border-radius:12px}
+    .button:hover{background:#d2ebff}
+    .button.secondary{background:transparent;border-color:var(--line);color:var(--text)}
+    .button.secondary:hover{background:var(--surface)}
+    .button svg{width:17px;height:17px;flex:none}
+    .requirements,.caption{font-size:.875rem;color:var(--muted);margin:13px 0 0}
+    .hero-frame{margin:0;min-width:0;background:#121b28;border:1px solid #859cc649;border-radius:22px;overflow:hidden;box-shadow:0 26px 80px #04070c66}
+    .hero-frame img{aspect-ratio:16/9;object-fit:cover}
+    .hero-frame figcaption{padding:12px 17px;background:#161f2d;color:var(--muted);font-size:.88rem}
+    .section{padding:75px 0;border-top:1px solid #ffffff16}
+    h2{font-size:clamp(2.05rem,4.6vw,3.65rem);line-height:1.09;letter-spacing:-.055em;margin-bottom:12px}
+    html[lang="zh-CN"] h2{letter-spacing:-.035em}
+    .intro{color:var(--muted);font-size:1.075rem;max-width:56ch;margin-bottom:28px}
+    .features{display:grid;grid-template-columns:minmax(0,.73fr) minmax(0,1.27fr);gap:20px}
+    .feature-controls{display:grid;gap:7px;align-content:start}
+    .feature{width:100%;display:block;text-align:left;background:transparent;padding:13px 17px;border:1px solid transparent;border-radius:12px;color:var(--text);cursor:pointer}
+    .feature strong{display:block;font-size:1.02rem}
+    .feature span.detail{display:block;font-size:.92rem;color:var(--muted);margin-top:3px;line-height:1.43}
+    .feature:hover,.feature[aria-pressed="true"]{background:var(--surface);border-color:var(--line)}
+    .feature[aria-pressed="true"] strong{color:var(--blue)}
+    .feature-view{margin:0;min-width:0;border:1px solid var(--line);border-radius:17px;overflow:hidden;background:var(--surface)}
+    .feature-view img{aspect-ratio:16/9;object-fit:contain}
+    .feature-view figcaption{border-top:1px solid var(--line);padding:10px 16px;color:var(--muted);font-size:.87rem}
+    .film-grid,.install-grid{display:grid;grid-template-columns:minmax(0,.87fr) minmax(0,1.13fr);gap:42px;align-items:center}
+    .film{border:1px solid var(--line);border-radius:17px;overflow:hidden;background:var(--surface)}
+    .film video{aspect-ratio:16/9;background:#090d14}
+    .film-note{padding:10px 15px;margin:0;color:var(--muted);font-size:.86rem}
+    .steps{margin:0;padding-left:1.2rem;color:var(--muted)}
+    .steps li+li{margin-top:7px}
+    .install-card{border:1px solid var(--line);padding:23px 25px;border-radius:15px;background:var(--surface)}
+    .install-card h3{font-size:1.14rem;margin-bottom:9px}
+    .install-card details{margin-top:12px}
+    .install-card summary{cursor:pointer;color:var(--blue)}
+    .install-card details p{margin:.65rem 0 0;color:var(--muted);font-size:.94rem}
+    .availability{margin:12px 0 0;color:var(--muted);font-size:.93rem}
+    .foot{border-top:1px solid #ffffff16;padding:23px 0 31px;color:var(--muted)}
+    .foot-inner{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    .foot a+a{margin-left:18px}
+    @media(max-width:850px){.wrap{width:min(var(--frame),calc(100% - 40px))}.hero{padding:59px 0 57px}.hero-grid,.film-grid,.install-grid{grid-template-columns:1fr;gap:22px}.hero-grid .lead{max-width:50ch}.section{padding:52px 0}.features{grid-template-columns:1fr}.feature-controls{grid-template-columns:1fr 1fr}}
+    @media(max-width:520px){.wrap{width:calc(100% - 32px)}.top-inner{min-height:63px}.nav{gap:10px}.nav a{display:none}.hero{padding:41px 0 43px}.hero-grid{gap:26px}.feature{padding:10px 11px}.section{padding:42px 0}.install-card{padding:17px}.button{padding:0 12px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="#top"><img src="icon.png" width="31" height="31" alt="">iRing</a>
+      <nav class="nav" aria-label="Main">
+        <a href="#features"><span lang="en">Features</span><span lang="zh-CN">功能</span></a>
+        <a href="#install"><span lang="en">Installation</span><span lang="zh-CN">安装</span></a>
+        <a href="https://github.com/GitxHui/iRing">GitHub</a>
+        <div class="langs" aria-label="Language / 语言">
+          <button type="button" data-language="en" aria-pressed="true">EN</button>
+          <button type="button" data-language="zh-CN" aria-pressed="false">中文</button>
+        </div>
+      </nav>
+    </div>
+  </header>
+  <main id="top">
+    <section class="hero" aria-labelledby="title">
+      <div class="wrap hero-grid">
+        <div>
+          <p class="release"><span lang="en">iRing for macOS · Beta 2</span><span lang="zh-CN">iRing for macOS · Beta 2 公测</span></p>
+          <h1 id="title"><span lang="en">Your windows.<br><span class="accent">At your cursor.</span></span><span lang="zh-CN">切换、分屏、缩放<br><span class="accent">就在光标处</span></span></h1>
+          <p class="lead"><span lang="en">Hold left Option to open the ring. Switch apps, preview a layout, or scroll to resize.</span><span lang="zh-CN">按住左 ⌥ 呼出圆环。指向应用即可切换，按 Tab 进入分屏，双指滑动调整窗口大小。</span></p>
+          <div class="actions">
+            <a class="button" href="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.dmg">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg>
+              <span lang="en">Download for Mac</span><span lang="zh-CN">下载 macOS Beta</span>
+            </a>
+            <a class="button secondary" href="#film"><span lang="en">Watch the demo</span><span lang="zh-CN">看操作演示</span></a>
+          </div>
+          <p class="requirements"><span lang="en">Free beta · macOS 15+ · Apple silicon</span><span lang="zh-CN">免费公测 · macOS 15 或更新版本 · Apple 芯片</span></p>
+        </div>
+        <figure class="hero-frame">
+          <picture>
+            <source media="(prefers-reduced-motion: reduce)" srcset="media/video-poster-en.jpg">
+            <img id="hero-demo" src="media/hero-en.webp" width="1280" height="720" alt="iRing opens a radial control at the pointer.">
+          </picture>
+          <figcaption><span lang="en">App switching, tiling, and resizing in the same ring.</span><span lang="zh-CN">切应用、分屏和缩放，都从同一个圆环开始。</span></figcaption>
+        </figure>
+      </div>
+    </section>
+    <section id="features" class="section">
+      <div class="wrap">
+        <h2><span lang="en">Four ways to use iRing</span><span lang="zh-CN">iRing 的四个用法</span></h2>
+        <p class="intro"><span lang="en">Use the ring for window actions and keep your favorite apps within reach in a Liquid Glass dock.</span><span lang="zh-CN">用圆环管理窗口，把常用应用放进贴合屏幕边缘的 Liquid Glass 灵动岛。</span></p>
+        <div class="features">
+          <div class="feature-controls" aria-label="Feature demos / 功能演示">
+            <button class="feature" type="button" data-feature="switch" aria-pressed="true"><strong><span lang="en">Switch apps</span><span lang="zh-CN">切应用</span></strong><span class="detail"><span lang="en">Hold left ⌥, point, and release.</span><span lang="zh-CN">按住左 ⌥，指向应用，松手切换。</span></span></button>
+            <button class="feature" type="button" data-feature="tile" aria-pressed="false"><strong><span lang="en">Tile windows</span><span lang="zh-CN">分屏预览</span></strong><span class="detail"><span lang="en">Press Tab in the ring to preview a layout.</span><span lang="zh-CN">圆环打开时按 Tab，预览半屏或四角布局。</span></span></button>
+            <button class="feature" type="button" data-feature="resize" aria-pressed="false"><strong><span lang="en">Resize continuously</span><span lang="zh-CN">连续缩放</span></strong><span class="detail"><span lang="en">Scroll in the ring to resize from 45% to 100%.</span><span lang="zh-CN">在圆环里滚动，在 45%～100% 之间调节。</span></span></button>
+            <button class="feature" type="button" data-feature="island" aria-pressed="false"><strong><span lang="en">Use the edge dock</span><span lang="zh-CN">灵动岛 Dock</span></strong><span class="detail"><span lang="en">Place favorite apps by the notch or a screen edge.</span><span lang="zh-CN">常用应用停靠在刘海附近或任一屏幕边缘。</span></span></button>
+          </div>
+          <figure class="feature-view">
+            <picture>
+              <source media="(prefers-reduced-motion: reduce)" srcset="media/video-poster-en.jpg">
+              <img id="feature-demo" src="media/switch.webp" width="1280" height="720" loading="lazy" alt="Switch apps with the iRing radial menu.">
+            </picture>
+            <figcaption><span lang="en">Choose a feature to see it in action.</span><span lang="zh-CN">选择功能查看对应动图。</span></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+    <section id="film" class="section">
+      <div class="wrap film-grid">
+        <div><h2><span lang="en">See iRing in action</span><span lang="zh-CN">看 iRing 怎么用</span></h2>
+          <p class="intro"><span lang="en">A 35-second look at the ring, window previews, and the edge dock.</span><span lang="zh-CN">35 秒看完圆环切换、分屏预览和灵动岛。</span></p>
+          <a id="film-link" href="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-promo-en.mp4"><span lang="en">Download the demo video</span><span lang="zh-CN">下载演示视频</span></a>
+        </div>
+        <div class="film">
+          <video id="demo-film" controls playsinline preload="none" poster="media/video-poster-en.jpg" src="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-promo-en.mp4">
+            Your browser does not support inline playback.
+          </video>
+          <p class="film-note"><span lang="en">The video has sound.</span><span lang="zh-CN">视频含声音。</span></p>
+        </div>
+      </div>
+    </section>
+    <section id="install" class="section">
+      <div class="wrap install-grid">
+        <div>
+          <h2><span lang="en">Install iRing</span><span lang="zh-CN">安装 iRing</span></h2>
+          <p class="intro"><span lang="en">Requires macOS 15 or later on a Mac with Apple silicon.</span><span lang="zh-CN">适用于运行 macOS 15 或更新版本的 Apple 芯片 Mac。</span></p>
+          <div class="actions">
+            <a class="button" href="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.dmg"><span lang="en">Download DMG</span><span lang="zh-CN">下载 DMG</span></a>
+            <a href="https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-v0.1.0-beta.2-macOS-arm64.zip"><span lang="en">ZIP download</span><span lang="zh-CN">ZIP 下载</span></a>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3><span lang="en">First launch</span><span lang="zh-CN">首次打开</span></h3>
+          <ol class="steps">
+            <li><span lang="en">Open the DMG and drag iRing to Applications.</span><span lang="zh-CN">打开 DMG，把 iRing 拖到「应用程序」。</span></li>
+            <li><span lang="en">Open iRing and allow it in System Settings → Privacy &amp; Security → Accessibility.</span><span lang="zh-CN">打开 iRing，前往「系统设置 → 隐私与安全性 → 辅助功能」启用 iRing。</span></li>
+          </ol>
+          <details><summary><span lang="en">If macOS blocks the beta</span><span lang="zh-CN">如果 macOS 阻止打开 Beta</span></summary><p><span lang="en">This build has not been notarized. Check the checksum and read the first-launch instructions on the release page.</span><span lang="zh-CN">此版本尚未经过 Apple 公证。如首次打开受阻，请核对下载校验值，再按发布页的安装说明处理。</span></p></details>
+          <p class="availability"><a href="https://github.com/GitxHui/iRing/releases/tag/v0.1.0-beta.2"><span lang="en">Release notes and SHA-256 checksums</span><span lang="zh-CN">版本说明与 SHA-256 校验值</span></a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="foot"><div class="wrap foot-inner">
+    <span>iRing for macOS</span>
+    <div><a href="https://github.com/GitxHui/iRing">GitHub</a><a href="https://github.com/GitxHui/iRing/issues"><span lang="en">Report an issue</span><span lang="zh-CN">反馈问题</span></a><a href="https://github.com/GitxHui/iRing/blob/main/LICENSE">MIT</a></div>
+  </div></footer>
+  <script>
+    const languages = [...document.querySelectorAll('[data-language]')];
+    const hero = document.getElementById('hero-demo');
+    const film = document.getElementById('demo-film');
+    const filmLink = document.getElementById('film-link');
+    const featureImage = document.getElementById('feature-demo');
+    const features = [...document.querySelectorAll('[data-feature]')];
+    const featureAlts = {
+      switch: ['Switch apps with the iRing radial menu.', '用 iRing 圆环切换应用。'],
+      tile: ['Preview and tile a window with iRing.', '使用 iRing 预览分屏并放置窗口。'],
+      resize: ['Resize a window continuously with iRing.', '使用 iRing 连续调整窗口大小。'],
+      island: ['Keep favorite apps in the Liquid Glass edge dock.', '把常用应用放在 Liquid Glass 灵动岛里。']
+    };
+    let activeFeature = 'switch';
+    function setLanguage(language) {
+      document.documentElement.lang = language;
+      const chinese = language === 'zh-CN';
+      const suffix = chinese ? 'zh' : 'en';
+      for (const button of languages) button.setAttribute('aria-pressed', String(button.dataset.language === language));
+      hero.src = 'media/hero-' + suffix + '.webp';
+      hero.alt = chinese ? 'iRing 在光标处打开圆环。' : 'iRing opens a radial control at the pointer.';
+      hero.previousElementSibling.srcset = 'media/video-poster-' + suffix + '.jpg';
+      featureImage.previousElementSibling.srcset = 'media/video-poster-' + suffix + '.jpg';
+      featureImage.alt = featureAlts[activeFeature][Number(chinese)];
+      film.poster = 'media/video-poster-' + suffix + '.jpg';
+      filmLink.href = 'https://github.com/GitxHui/iRing/releases/download/v0.1.0-beta.2/iRing-promo-' + suffix + '.mp4';
+      if (film.src !== filmLink.href) film.src = filmLink.href;
+    }
+    for (const button of features) button.addEventListener('click', () => {
+      activeFeature = button.dataset.feature;
+      for (const item of features) item.setAttribute('aria-pressed', String(item === button));
+      featureImage.src = 'media/' + activeFeature + '.webp';
+      featureImage.alt = featureAlts[activeFeature][Number(document.documentElement.lang === 'zh-CN')];
+    });
+    for (const button of languages) button.addEventListener('click', () => {
+      const language = button.dataset.language;
+      setLanguage(language);
+      const url = new URL(location.href);
+      url.searchParams.set('lang', language === 'zh-CN' ? 'zh' : 'en');
+      history.replaceState(null, '', url);
+    });
+    const queryLanguage = new URLSearchParams(location.search).get('lang');
+    setLanguage(queryLanguage === 'zh' || (queryLanguage !== 'en' && navigator.language.toLowerCase().startsWith('zh')) ? 'zh-CN' : 'en');
+  </script>
+</body>
+</html>
