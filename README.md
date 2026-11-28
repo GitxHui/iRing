@@ -163,15 +163,78 @@
 
 ## 与同类工具
 
-| 工具 | 擅长的事 | 主要操作方式 |
-| --- | --- | --- |
-| macOS 自带 | 应用切换、窗口平铺 | **⌘ + Tab**、拖拽或菜单 |
-| AltTab | 类 Windows 的窗口切换器 | 快捷键呼出窗口缩略图 |
-| Rectangle | 快捷键与拖拽分屏 | 键盘快捷键、拖到屏幕边缘 |
-| Loop | 圆环式窗口布局 | 按住触发键，在圆环里选方向 |
-| **iRing** | 切换、分屏、缩放与灵动岛放进同一个圆环 | 按住 **⌥** 或**鼠标中键**，在光标处操作 |
+<table align="center">
+  <thead>
+    <tr>
+      <th align="left"></th>
+      <th><b>iRing</b></th>
+      <th>Loop</th>
+      <th>Rectangle</th>
+      <th>AltTab</th>
+      <th>macOS 自带</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="left">切换应用</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">分屏布局（二分 / 四分 / 全屏）</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">在光标处用圆环操作</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">切换与分屏在同一个圆环</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">刘海旁的常用应用栏</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">免费</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">开源</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+  </tbody>
+</table>
 
-<sub>各工具都很优秀，可以并存；对比基于公开资料，如有出入欢迎指正。</sub>
+<p align="center"><sub>各工具都很优秀，可以并存。对比基于各项目公开资料，「—」表示未提供该能力，如有出入欢迎指正。</sub></p>
 
 <p align="center"><img src="docs/media/divider.svg" width="820" alt="" /></p>
 

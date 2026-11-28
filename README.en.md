@@ -160,15 +160,78 @@ You can also enable a dedicated tiling shortcut in Shortcuts settings, which war
 
 ## Compared with
 
-| Tool | Best at | How you drive it |
-| --- | --- | --- |
-| macOS built-in | ⌘Tab app switching and window tiling | Keyboard shortcuts, menus, dragging windows |
-| AltTab | A Windows-style window switcher | Keyboard shortcut and a window list |
-| Rectangle | Snapping windows into layouts | Keyboard shortcuts and drag-to-snap |
-| Loop | Radial window layouts | A trigger key and a radial menu |
-| **iRing** | **Switch + tile + resize + island, all in one ring** | **⌥ or the middle mouse button, right at the cursor** |
+<table align="center">
+  <thead>
+    <tr>
+      <th align="left"></th>
+      <th><b>iRing</b></th>
+      <th>Loop</th>
+      <th>Rectangle</th>
+      <th>AltTab</th>
+      <th>macOS built-in</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="left">Switch apps</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">Tile windows (halves / quarters / full)</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">Radial ring at the cursor</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">Switching and tiling in one ring</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">App dock by the notch</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+    <tr>
+      <td align="left">Free</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+    </tr>
+    <tr>
+      <td align="left">Open source</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center">✅</td>
+      <td align="center"><sub>—</sub></td>
+    </tr>
+  </tbody>
+</table>
 
-<sub>All great tools that can live side by side. Based on each project's public docs — corrections welcome.</sub>
+<p align="center"><sub>All great tools that can live side by side. Based on each project's public docs; “—” means not offered. Corrections welcome.</sub></p>
 
 <p align="center"><img src="docs/media/divider.svg" width="820" alt="" /></p>
 
