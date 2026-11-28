@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 40" width="820" height="20" role="presentation">
+<style>
+  .g { animation: glide 5s cubic-bezier(.45,0,.2,1) infinite; }
+  @keyframes glide { 0% { transform: translateX(-500px); } 100% { transform: translateX(1740px); } }
+</style>
+<defs>
+  <linearGradient id="l" x1="0" x2="1"><stop offset="0" stop-color="#8E8E93" stop-opacity="0"/><stop offset=".5" stop-color="#8E8E93" stop-opacity=".45"/><stop offset="1" stop-color="#8E8E93" stop-opacity="0"/></linearGradient>
+  <linearGradient id="h" x1="0" x2="1"><stop offset="0" stop-color="#0A84FF" stop-opacity="0"/><stop offset=".5" stop-color="#0A84FF" stop-opacity="1"/><stop offset="1" stop-color="#0A84FF" stop-opacity="0"/></linearGradient>
+</defs>
+<rect x="0" y="19.0" width="1640" height="2" fill="url(#l)"/>
+<rect class="g" x="0" y="18.5" width="400" height="3" rx="1.5" fill="url(#h)"/>
+</svg>

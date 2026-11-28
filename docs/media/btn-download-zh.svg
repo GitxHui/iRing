@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 120" width="320" height="60" role="img" aria-label="下载 macOS Beta">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', sans-serif; }
+  .sheen { animation: sheen 4s ease-in-out infinite; }
+  @keyframes sheen { 0%, 60% { transform: translateX(-260px); } 100% { transform: translateX(700px); } }
+  .arrow { animation: bob 2s ease-in-out infinite; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(5px); } }
+</style>
+<defs>
+  <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A8BFF"/><stop offset="1" stop-color="#0060DF"/></linearGradient>
+  <linearGradient id="s" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <clipPath id="c"><rect x="2" y="2" width="636" height="116" rx="58.0"/></clipPath>
+</defs>
+<g clip-path="url(#c)">
+  <rect x="2" y="2" width="636" height="116" fill="url(#b)"/>
+  <g class="sheen"><rect x="0" y="0" width="200" height="120" fill="url(#s)" transform="skewX(-20)"/></g>
+</g>
+<rect x="2.5" y="2.5" width="635" height="115" rx="57.5" fill="none" stroke="#fff" stroke-opacity=".28"/>
+<g class="arrow" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M74 38v32m0 0l-13-13m13 13l13-13M56 84h36"/>
+</g>
+<text x="120" y="72.0" font-size="38" font-weight="600" fill="#fff">下载 macOS Beta</text>
+</svg>
